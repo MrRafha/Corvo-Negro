@@ -63,22 +63,29 @@ Sábados (11 e 18) = off (D&D).
 - [x] Commit de setup inicial (feito pelo usuário)
 - [x] **Dia 1 — `shared/crypto_utils.py` + `tests/test_crypto.py`** (16 testes ✅)
 - [x] **Dia 2 — Socket TCP + Protocolo** (`protocol.py`, `session_manager.py`, `router.py`, `server/main.py`, `client_socket.py`, `cli_test.py`) — 9 testes ✅
+- [x] **Dia 3 — Autenticação** (`database.py` schema completo, `handlers/auth.py`, `Router` com `db`, `test_auth.py`) — 9 testes ✅
 - [x] venv de pé (Python **3.14.0**) com deps instaladas
 
-**Ambiente rodando:** 25/25 testes passando (`.\venv\Scripts\python.exe -m pytest`).
+**Ambiente rodando:** 34/34 testes passando (`.\venv\Scripts\python.exe -m pytest`).
 
 ---
 
 ## 🚀 Próximos passos imediatos (ordem)
 
-**Estamos no início do Dia 3 — Autenticação.**
+**Próximo: Dia 4 — E2E 1:1 (mensagens diretas com criptografia híbrida RSA+AES).**
 
-1. `server/database.py` — schema SQLite `users` + `create_user` / `get_user_by_username` / `update_public_key`.
-2. `server/handlers/auth.py` — `handle_register`, `handle_login`, `handle_logout` (usa `crypto_utils.hash_password/verify_password`).
-3. Registrar os handlers de auth no `router.py`.
-4. Fluxo CLI de cadastro e login (estender `client/cli_test.py`).
-5. `tests/test_auth.py` — usuário duplicado, senha errada, login sem cadastro.
-6. **Commit alvo:** `feat: autenticação com SHA-256 + PBKDF2`.
+1. No login, cliente **gera par RSA** localmente e envia `public_key` ao servidor → `update_public_key()` no DB.
+2. Novo handler `CMD_GET_PUBKEY(username)` — servidor devolve a public key PEM de outro user.
+3. Registrar `GET_PUBKEY` no router.
+4. Comando `CMD_MSG_1V1` no servidor (só roteia, não decifra):
+   - Remetente pede pubkey do destinatário
+   - Gera AES key aleatória
+   - Cifra mensagem com AES-CBC
+   - Cifra a AES key com RSA-OAEP do destinatário
+   - Envia `{recipient, ciphertext, encrypted_key, iv, sender}`
+5. Destinatário: decifra AES key com RSA privada, decifra msg com AES.
+6. `client/storage/key_vault.py` — salvar/carregar priv key cifrada com a senha (PBKDF2 → AES-256).
+7. **Commit alvo:** `feat: mensagens 1:1 com criptografia híbrida RSA+AES`.
 
 ### O que já está pronto e reutilizável
 
