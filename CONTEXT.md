@@ -57,44 +57,38 @@ Sábados (11 e 18) = off (D&D).
 - [x] `README.md` pronto
 - [x] `DEVELOPMENT.md` pronto (guia de sprints)
 - [x] `CONTEXT.md` (este arquivo)
-- [ ] Repositório GitHub `corvo-negro` criado (público)
-- [ ] Estrutura de pastas
-- [ ] `.gitignore`, `requirements.txt`, `LICENSE`
-- [ ] Primeiro commit: `chore: setup inicial do projeto`
-- [ ] `shared/crypto_utils.py` + `tests/test_crypto.py`
+- [x] Repositório GitHub `Corvo-Negro` criado (público) + remote conectado
+- [x] Estrutura de pastas completa (bate com a árvore do DEVELOPMENT.md)
+- [x] `.gitignore`, `requirements.txt` (raiz + por componente), `LICENSE`
+- [x] Commit de setup inicial (feito pelo usuário)
+- [x] **Dia 1 — `shared/crypto_utils.py` + `tests/test_crypto.py`** (16 testes ✅)
+- [x] **Dia 2 — Socket TCP + Protocolo** (`protocol.py`, `session_manager.py`, `router.py`, `server/main.py`, `client_socket.py`, `cli_test.py`) — 9 testes ✅
+- [x] venv de pé (Python **3.14.0**) com deps instaladas
+
+**Ambiente rodando:** 25/25 testes passando (`.\venv\Scripts\python.exe -m pytest`).
 
 ---
 
 ## 🚀 Próximos passos imediatos (ordem)
 
-1. **Criar o repo `corvo-negro` no GitHub** (público). ← *estamos aqui*
-2. `git init` / clone local, mover `DEVELOPMENT.md` para `docs/`.
-3. Criar a estrutura de pastas (árvore no `docs/DEVELOPMENT.md`).
-4. `.gitignore` de Python (nunca commitar `.db`, `.env`, `venv/`, `__pycache__`, `*.key`, `*.pem`).
-5. `requirements.txt` inicial: `cryptography`, `pytest`.
-6. Setup do venv + primeiro commit.
-7. Implementar `shared/crypto_utils.py` e os testes.
+**Estamos no início do Dia 3 — Autenticação.**
 
-### Assinaturas alvo de `shared/crypto_utils.py` (Dia 1, tarde)
+1. `server/database.py` — schema SQLite `users` + `create_user` / `get_user_by_username` / `update_public_key`.
+2. `server/handlers/auth.py` — `handle_register`, `handle_login`, `handle_logout` (usa `crypto_utils.hash_password/verify_password`).
+3. Registrar os handlers de auth no `router.py`.
+4. Fluxo CLI de cadastro e login (estender `client/cli_test.py`).
+5. `tests/test_auth.py` — usuário duplicado, senha errada, login sem cadastro.
+6. **Commit alvo:** `feat: autenticação com SHA-256 + PBKDF2`.
 
-```python
-hash_password(password: str) -> bytes            # salt 16B + PBKDF2-HMAC-SHA256, 100k
-verify_password(password: str, stored: bytes) -> bool
-generate_rsa_keypair() -> tuple[bytes, bytes]    # PEM (priv, pub)
-rsa_encrypt(data: bytes, public_key_pem: bytes) -> bytes   # OAEP + SHA-256
-rsa_decrypt(ciphertext: bytes, private_key_pem: bytes) -> bytes
-aes_encrypt(plaintext: bytes, key: bytes) -> tuple[bytes, bytes]  # CBC -> (ciphertext, iv)
-aes_decrypt(ciphertext: bytes, key: bytes, iv: bytes) -> bytes
-generate_aes_key() -> bytes                      # 32 bytes = AES-256
-derive_key_from_password(password: str, salt: bytes) -> bytes    # PBKDF2 p/ DB local
-```
+### O que já está pronto e reutilizável
 
-### Testes alvo (`tests/test_crypto.py`)
-
-- Hash + verify (senha correta e errada)
-- RSA round-trip
-- AES round-trip
-- PBKDF2 determinístico com mesmo salt
+- `crypto_utils`: hash/verify de senha, RSA-2048 OAEP, AES-256-CBC, PBKDF2. **16 testes.**
+- `protocol`: framing `[4B tamanho][JSON]`, constantes de todos os comandos, helpers `make_request/make_response/make_event`. **Testado.**
+- `SessionManager`: mapa socket→sessão thread-safe, unicast/broadcast, autenticação de sessão.
+- `Router`: despacho `cmd → handler` com `register()`; handlers embutidos `PING`/`ECHO`.
+- `CorvoServer`: TCP threaded (1 thread/cliente), testado com 3 clientes simultâneos.
+- `CorvoClient`: connect/send/close + thread de recv → `inbox` (queue).
+- `cli_test`: `python -m client.cli_test` (`/ping`, `/echo`, `/raw`, `/quit`).
 
 ---
 
