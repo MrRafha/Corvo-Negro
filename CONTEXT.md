@@ -52,7 +52,7 @@ Sábados (11 e 18) = off (D&D).
 
 ## ✅ Estado atual
 
-**Data:** 08/07/2026 — **Dia 4 da Sprint 1 (E2E 1:1) concluído.**
+**Data:** 08/07/2026 — **Dia 5 da Sprint 1 (Fóruns) concluído.**
 
 - [x] `README.md` pronto
 - [x] `DEVELOPMENT.md` pronto (guia de sprints)
@@ -65,26 +65,25 @@ Sábados (11 e 18) = off (D&D).
 - [x] **Dia 2 — Socket TCP + Protocolo** (`protocol.py`, `session_manager.py`, `router.py`, `server/main.py`, `client_socket.py`, `cli_test.py`) — 9 testes ✅
 - [x] **Dia 3 — Autenticação** (`database.py` schema completo, `handlers/auth.py`, `Router` com `db`, `test_auth.py`) — 9 testes ✅
 - [x] **Dia 4 — E2E 1:1** (`CMD_UPDATE_PUBKEY`/`CMD_GET_PUBKEY` em `handlers/key_exchange.py`, `CMD_MSG_1V1` em `handlers/message.py`, tabela `direct_messages`, `client/storage/key_vault.py`, `cli_test.py` com `/register /login /dm`, `tests/test_e2e.py` + `tests/test_key_vault.py`) — 15 testes ✅
+- [x] **Dia 5 — Fóruns** (`handlers/forum.py` completo: `create_forum`/`join_forum`/`leave_forum`/`list_my_forums`, códigos `CORVO-XXXX-XXXX` com SHA-256 hash, métodos de DB `create_forum`/`get_forum_by_invite_hash`/`add_member`/`remove_member`/`is_member`/`get_forum_members`/`get_forums_for_user`, eventos `MEMBER_JOINED`/`MEMBER_LEFT`, `cli_test.py` com `/create /join /leave /list`, `tests/test_forum.py`) — 13 testes ✅
 - [x] venv de pé (Python **3.14.0**) com deps instaladas
 
-**Ambiente rodando:** 49/49 testes passando (`.\venv\Scripts\python.exe -m pytest`).
-**Validado manualmente:** servidor real + 2 clientes TCP trocando DM cifrada ponta a ponta (Alice cifra com a pubkey do Bob, servidor só roteia, Bob decifra e recupera o texto original).
+**Ambiente rodando:** 62/62 testes passando (`.\venv\Scripts\python.exe -m pytest`).
+**Validado manualmente:** servidor real + 2 clientes TCP — DM cifrada ponta a ponta (Dia 4) e ciclo completo de fórum: criar → convite → join → notificação em tempo real → list → leave → notificação (Dia 5).
 
 ---
 
 ## 🚀 Próximos passos imediatos (ordem)
 
-**Próximo: Dia 5 — Fóruns (criação, convite por hash, membership).**
+**Próximo: Dia 6 — E2E em grupo (chave AES por fórum, distribuição via RSA, rotação ao sair).**
 
-1. `shared/models.py`: dataclasses `Forum`, `ForumMember` (ainda vazio, previsto pra este dia).
-2. Handler `create_forum`: cliente envia nome → servidor gera código de convite (`CORVO-XXXX-XXXX`), guarda `SHA-256(código)` em `forums.invite_hash`, devolve o código em claro pro dono compartilhar.
-3. Handler `join_forum`: cliente envia código → servidor compara hash → insere em `forum_members`.
-4. Handler `list_my_forums` e `leave_forum`.
-5. Registrar os 4 comandos no router (`CMD_CREATE_FORUM`, `CMD_JOIN_FORUM`, `CMD_LEAVE_FORUM`, `CMD_LIST_MY_FORUMS` já existem em `protocol.py`).
-6. CLI: comandos `/create`, `/join`, `/list`, `/leave`.
-7. **Commit alvo:** `feat: sistema de fóruns com convites por hash`.
-
-Tabelas `forums`/`forum_members` já existem no schema (`server/database.py`), faltam os métodos de acesso (`create_forum`, `get_forum_by_invite_hash`, `add_member`, etc.) e os handlers.
+1. `shared/models.py`: dataclasses `Forum`, `ForumMember`, `Message` (ainda vazio).
+2. Ao criar/entrar num fórum: dono gera uma chave AES do fórum, cifra com a RSA pública de cada membro, envia via `CMD_DISTRIBUTE_KEY` → servidor guarda em `forum_keys` (tabela já existe no schema) por `(forum_id, user_id, key_version)`.
+3. Handler `send` em `handlers/message.py`: persiste `ciphertext`+`iv`+`key_version` na tabela `messages` (já existe no schema) e faz broadcast `EVT_NEW_MESSAGE` só pros membros online.
+4. Handler `history` (`CMD_GET_HISTORY`): retorna mensagens do fórum pro cliente decifrar localmente com a key_version correspondente.
+5. **Rotação de chave ao sair** (`handle_leave_forum` já tem o TODO marcado): ao alguém sair, o fórum precisa de uma nova key_version — o dono (ou quem ficou) gera nova AES key, redistribui pros membros restantes, servidor incrementa `key_version` e dispara `EVT_KEY_ROTATED`.
+6. CLI: comandos `/send <forum_id> <msg>` e `/history <forum_id>`.
+7. **Commit alvo:** `feat: E2E em grupo com rotação de chave AES por fórum`.
 
 ### O que já está pronto e reutilizável
 
@@ -96,7 +95,8 @@ Tabelas `forums`/`forum_members` já existem no schema (`server/database.py`), f
 - `CorvoClient`: connect/send/close + thread de recv → `inbox` (queue).
 - `key_vault`: salva/carrega a private key RSA cifrada (PBKDF2 → AES-256) em `~/.corvo_negro/keys/<user>.key`.
 - Mensagens 1:1 (`MSG_1V1`): fluxo híbrido RSA+AES completo, servidor só persiste/roteia ciphertext em `direct_messages`.
-- `cli_test`: `python -m client.cli_test` (`/register`, `/login`, `/dm`, `/ping`, `/echo`, `/raw`, `/quit`) — decifra `NEW_DM` automaticamente se a chave privada estiver carregada.
+- Fóruns: criação com convite `CORVO-XXXX-XXXX` (hash SHA-256, código nunca fica em claro no DB), join/leave/list, notificações `MEMBER_JOINED`/`MEMBER_LEFT` só pros membros online.
+- `cli_test`: `python -m client.cli_test` (`/register`, `/login`, `/dm`, `/create`, `/join`, `/leave`, `/list`, `/ping`, `/echo`, `/raw`, `/quit`) — decifra `NEW_DM` automaticamente se a chave privada estiver carregada.
 
 ---
 

@@ -43,6 +43,7 @@ class Router:
         self._register_auth()
         self._register_key_exchange()
         self._register_message()
+        self._register_forum()
 
     def register(self, cmd: str, handler: Handler) -> None:
         """Registra o handler de um comando."""
@@ -82,6 +83,18 @@ class Router:
     def _register_message(self) -> None:
         from server.handlers.message import handle_msg_1v1
         self.register(protocol.CMD_MSG_1V1, handle_msg_1v1)
+
+    def _register_forum(self) -> None:
+        from server.handlers.forum import (
+            handle_create_forum,
+            handle_join_forum,
+            handle_leave_forum,
+            handle_list_my_forums,
+        )
+        self.register(protocol.CMD_CREATE_FORUM, handle_create_forum)
+        self.register(protocol.CMD_JOIN_FORUM, handle_join_forum)
+        self.register(protocol.CMD_LEAVE_FORUM, handle_leave_forum)
+        self.register(protocol.CMD_LIST_MY_FORUMS, handle_list_my_forums)
 
     @staticmethod
     def _handle_ping(_data: dict, _ctx: HandlerContext) -> dict:

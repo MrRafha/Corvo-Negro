@@ -1,4 +1,4 @@
-"""CLI de teste do cliente Corvo Negro (Sprint 1, Dias 2-4).
+"""CLI de teste do cliente Corvo Negro (Sprint 1, Dias 2-5).
 
 Conecta ao servidor e permite enviar comandos crus para exercitar o protocolo
 antes da GUI existir. Imprime tudo que chega na inbox, e decifra mensagens
@@ -13,6 +13,10 @@ Comandos interativos:
     /register <user> <senha>  -> cadastra e gera/salva par RSA local
     /login <user> <senha>     -> login e envia a public key ao servidor
     /dm <user> <mensagem>     -> envia mensagem 1:1 cifrada (RSA+AES hibrido)
+    /create <nome>            -> cria um forum, mostra o codigo de convite
+    /join <codigo>            -> entra num forum via codigo CORVO-XXXX-XXXX
+    /leave <forum_id>         -> sai de um forum
+    /list                     -> lista os foruns do usuario logado
     /raw <CMD> <json_data>    -> envia um request cru: cmd + data (JSON)
     /quit                     -> encerra
 """
@@ -118,6 +122,22 @@ def _cmd_dm(client: CorvoClient, recipient: str, texto: str) -> None:
     )
 
 
+def _cmd_create_forum(client: CorvoClient, name: str) -> None:
+    client.request(protocol.CMD_CREATE_FORUM, {"name": name})
+
+
+def _cmd_join_forum(client: CorvoClient, invite_code: str) -> None:
+    client.request(protocol.CMD_JOIN_FORUM, {"invite_code": invite_code})
+
+
+def _cmd_leave_forum(client: CorvoClient, forum_id: str) -> None:
+    client.request(protocol.CMD_LEAVE_FORUM, {"forum_id": int(forum_id)})
+
+
+def _cmd_list_forums(client: CorvoClient) -> None:
+    client.request(protocol.CMD_LIST_MY_FORUMS, {})
+
+
 def main() -> None:
     client = CorvoClient()
     try:
@@ -125,7 +145,10 @@ def main() -> None:
     except OSError as exc:
         print(f"[!] nao conectou: {exc}")
         return
-    print("[Corvo Negro] conectado. Comandos: /register /login /dm /ping /echo /raw /quit")
+    print(
+        "[Corvo Negro] conectado. Comandos: /register /login /dm "
+        "/create /join /leave /list /ping /echo /raw /quit"
+    )
 
     stop = threading.Event()
     printer = threading.Thread(target=_print_inbox, args=(client, stop), daemon=True)
@@ -151,12 +174,20 @@ def main() -> None:
             elif line.startswith("/dm "):
                 _, user, texto = line.split(" ", 2)
                 _cmd_dm(client, user, texto)
+            elif line.startswith("/create "):
+                _cmd_create_forum(client, line[len("/create "):])
+            elif line.startswith("/join "):
+                _cmd_join_forum(client, line[len("/join "):].strip())
+            elif line.startswith("/leave "):
+                _cmd_leave_forum(client, line[len("/leave "):].strip())
+            elif line == "/list":
+                _cmd_list_forums(client)
             elif line.startswith("/raw "):
                 _, cmd, *rest = line.split(" ", 2)
                 data = json.loads(rest[0]) if rest else {}
                 client.request(cmd, data)
             else:
-                print("comandos: /register /login /dm /ping /echo /raw /quit")
+                print("comandos: /register /login /dm /create /join /leave /list /ping /echo /raw /quit")
             time.sleep(0.05)
     except (EOFError, KeyboardInterrupt):
         pass

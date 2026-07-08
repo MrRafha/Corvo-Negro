@@ -184,5 +184,77 @@ class Database:
             self._conn.commit()
             return cursor.lastrowid
 
+    # --- forums -------------------------------------------------------------------
+
+    def create_forum(self, name: str, invite_hash: bytes, owner_id: int) -> int:
+        """Cria um forum e ja adiciona o dono como membro. Retorna o forum_id."""
+        with self._lock:
+            cursor = self._conn.execute(
+                "INSERT INTO forums (name, invite_hash, owner_id) VALUES (?, ?, ?)",
+                (name, invite_hash, owner_id),
+            )
+            forum_id = cursor.lastrowid
+            self._conn.execute(
+                "INSERT INTO forum_members (forum_id, user_id) VALUES (?, ?)",
+                (forum_id, owner_id),
+            )
+            self._conn.commit()
+            return forum_id
+
+    def get_forum_by_invite_hash(self, invite_hash: bytes) -> sqlite3.Row | None:
+        with self._lock:
+            return self._conn.execute(
+                "SELECT * FROM forums WHERE invite_hash = ?", (invite_hash,)
+            ).fetchone()
+
+    def get_forum_by_id(self, forum_id: int) -> sqlite3.Row | None:
+        with self._lock:
+            return self._conn.execute(
+                "SELECT * FROM forums WHERE id = ?", (forum_id,)
+            ).fetchone()
+
+    def add_member(self, forum_id: int, user_id: int) -> None:
+        """Adiciona um membro ao forum. Idempotente (INSERT OR IGNORE)."""
+        with self._lock:
+            self._conn.execute(
+                "INSERT OR IGNORE INTO forum_members (forum_id, user_id) VALUES (?, ?)",
+                (forum_id, user_id),
+            )
+            self._conn.commit()
+
+    def remove_member(self, forum_id: int, user_id: int) -> None:
+        with self._lock:
+            self._conn.execute(
+                "DELETE FROM forum_members WHERE forum_id = ? AND user_id = ?",
+                (forum_id, user_id),
+            )
+            self._conn.commit()
+
+    def is_member(self, forum_id: int, user_id: int) -> bool:
+        with self._lock:
+            row = self._conn.execute(
+                "SELECT 1 FROM forum_members WHERE forum_id = ? AND user_id = ?",
+                (forum_id, user_id),
+            ).fetchone()
+            return row is not None
+
+    def get_forum_members(self, forum_id: int) -> list[sqlite3.Row]:
+        with self._lock:
+            return self._conn.execute(
+                "SELECT users.id, users.username FROM forum_members "
+                "JOIN users ON users.id = forum_members.user_id "
+                "WHERE forum_members.forum_id = ?",
+                (forum_id,),
+            ).fetchall()
+
+    def get_forums_for_user(self, user_id: int) -> list[sqlite3.Row]:
+        with self._lock:
+            return self._conn.execute(
+                "SELECT forums.* FROM forums "
+                "JOIN forum_members ON forum_members.forum_id = forums.id "
+                "WHERE forum_members.user_id = ?",
+                (user_id,),
+            ).fetchall()
+
     def close(self) -> None:
         self._conn.close()
