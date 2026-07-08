@@ -1,0 +1,5 @@
+# Dependencias do cliente Corvo Negro
+cryptography>=42.0
+customtkinter>=5.2
+zeroconf>=0.130
+pytest>=8.0

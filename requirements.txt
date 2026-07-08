@@ -1,0 +1,5 @@
+# Dependencias compartilhadas do Corvo Negro
+# Instale por componente (server/ e client/) OU tudo pela raiz.
+
+cryptography>=42.0
+pytest>=8.0

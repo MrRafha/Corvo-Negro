@@ -1,0 +1,49 @@
+# === Python ===
+__pycache__/
+*.py[cod]
+*$py.class
+*.so
+.Python
+build/
+dist/
+*.egg-info/
+.eggs/
+
+# === Ambientes virtuais ===
+venv/
+.venv/
+env/
+ENV/
+
+# === Segredos e dados sensiveis (NUNCA committar) ===
+*.db
+*.sqlite
+*.sqlite3
+*.key
+*.pem
+.env
+.env.*
+secrets/
+key_vault/
+*.priv
+
+# === Testes / cobertura ===
+.pytest_cache/
+.coverage
+htmlcov/
+.tox/
+
+# === IDEs / editores ===
+.vscode/
+.idea/
+*.swp
+*.swo
+*~
+
+# === Sistema operacional ===
+.DS_Store
+Thumbs.db
+desktop.ini
+
+# === Claude Code ===
+.claude/
