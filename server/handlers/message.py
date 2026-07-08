@@ -1,10 +1,10 @@
 """Handlers de mensagens.
 
-handle_msg_1v1 -> persiste e roteia mensagem direta cifrada (Dia 4, nao decifra)
-send    -> persiste ciphertext e rotea para membros online (nao decifra) (Dia 6)
-history -> retorna mensagens do forum com key_version correspondente (Dia 6)
-pin     -> fixar mensagem (checa permissao) (Dia 6)
-delete  -> apagar mensagem (checa permissao) (Dia 6)
+handle_msg_1v1       -> persiste e roteia mensagem direta cifrada (Dia 4, nao decifra)
+handle_send_to_forum -> persiste ciphertext e rotea para membros online (Dia 6, nao decifra)
+handle_get_history   -> retorna mensagens do forum com key_version correspondente (Dia 6)
+pin     -> fixar mensagem (checa permissao) (Dia 7)
+delete  -> apagar mensagem (checa permissao) (Dia 7)
 """
 
 from __future__ import annotations
@@ -15,7 +15,7 @@ import uuid as uuid_lib
 from shared import protocol
 from server.router import HandlerContext
 
-# TODO(Sprint 1, Dia 6): send / history + pin / delete (checagem de permissao).
+# TODO(Sprint 1, Dia 7): pin / delete (checagem de permissao).
 
 
 def handle_msg_1v1(data: dict, ctx: HandlerContext) -> dict:
@@ -86,4 +86,110 @@ def handle_msg_1v1(data: dict, ctx: HandlerContext) -> dict:
 
     return protocol.make_response(
         "MSG_1V1_RESPONSE", protocol.STATUS_OK, message="mensagem enviada", data={"uuid": msg_uuid}
+    )
+
+
+def handle_send_to_forum(data: dict, ctx: HandlerContext) -> dict:
+    """Recebe uma mensagem de forum ja cifrada com a AES da sala e roteia.
+
+    O servidor apenas persiste e repassa aos membros online — nunca decifra.
+    Espera data = {
+        "forum_id": int,
+        "ciphertext": str (base64),
+        "iv": str (base64),
+        "key_version": int,
+    }
+    """
+    session = ctx.sessions.get(ctx.sock)
+    if session is None or session.get("user_id") is None:
+        return protocol.make_response(
+            "SEND_TO_FORUM_RESPONSE", protocol.STATUS_ERROR, message="nao autenticado"
+        )
+
+    forum_id = data.get("forum_id")
+    ciphertext_b64 = data.get("ciphertext")
+    iv_b64 = data.get("iv")
+    key_version = data.get("key_version")
+
+    if forum_id is None or not ciphertext_b64 or not iv_b64 or not key_version:
+        return protocol.make_response(
+            "SEND_TO_FORUM_RESPONSE",
+            protocol.STATUS_ERROR,
+            message="forum_id, ciphertext, iv e key_version sao obrigatorios",
+        )
+
+    if not ctx.db.is_member(forum_id, session["user_id"]):
+        return protocol.make_response(
+            "SEND_TO_FORUM_RESPONSE", protocol.STATUS_ERROR, message="voce nao e membro deste forum"
+        )
+
+    try:
+        ciphertext = base64.b64decode(ciphertext_b64)
+        iv = base64.b64decode(iv_b64)
+    except (ValueError, TypeError):
+        return protocol.make_response(
+            "SEND_TO_FORUM_RESPONSE", protocol.STATUS_ERROR, message="payload base64 invalido"
+        )
+
+    msg_uuid = str(uuid_lib.uuid4())
+    ctx.db.save_message(
+        uuid=msg_uuid,
+        forum_id=forum_id,
+        sender_id=session["user_id"],
+        ciphertext=ciphertext,
+        iv=iv,
+        key_version=key_version,
+    )
+
+    member_ids = {row["id"] for row in ctx.db.get_forum_members(forum_id)}
+    event = protocol.make_event(
+        protocol.EVT_NEW_MESSAGE,
+        data={
+            "uuid": msg_uuid,
+            "forum_id": forum_id,
+            "sender": session["username"],
+            "ciphertext": ciphertext_b64,
+            "iv": iv_b64,
+            "key_version": key_version,
+        },
+    )
+    ctx.sessions.broadcast_to_users(member_ids, event, exclude=ctx.sock)
+
+    return protocol.make_response(
+        "SEND_TO_FORUM_RESPONSE", protocol.STATUS_OK, message="mensagem enviada", data={"uuid": msg_uuid}
+    )
+
+
+def handle_get_history(data: dict, ctx: HandlerContext) -> dict:
+    """Retorna o historico de mensagens de um forum, ja cifradas.
+
+    O cliente decifra localmente cada mensagem com a AES key da key_version
+    correspondente. Espera data = {"forum_id": int}.
+    """
+    session = ctx.sessions.get(ctx.sock)
+    if session is None or session.get("user_id") is None:
+        return protocol.make_response(
+            "GET_HISTORY_RESPONSE", protocol.STATUS_ERROR, message="nao autenticado"
+        )
+
+    forum_id = data.get("forum_id")
+    if forum_id is None or not ctx.db.is_member(forum_id, session["user_id"]):
+        return protocol.make_response(
+            "GET_HISTORY_RESPONSE", protocol.STATUS_ERROR, message="voce nao e membro deste forum"
+        )
+
+    messages = [
+        {
+            "uuid": row["uuid"],
+            "sender": row["sender_username"],
+            "ciphertext": base64.b64encode(bytes(row["ciphertext"])).decode("ascii"),
+            "iv": base64.b64encode(bytes(row["iv"])).decode("ascii"),
+            "key_version": row["key_version"],
+            "pinned": bool(row["pinned"]),
+            "timestamp": row["timestamp"],
+        }
+        for row in ctx.db.get_messages_for_forum(forum_id)
+    ]
+    return protocol.make_response(
+        "GET_HISTORY_RESPONSE", protocol.STATUS_OK, data={"forum_id": forum_id, "messages": messages}
     )

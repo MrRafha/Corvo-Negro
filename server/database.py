@@ -256,5 +256,67 @@ class Database:
                 (user_id,),
             ).fetchall()
 
+    # --- forum_keys -----------------------------------------------------------
+
+    def save_forum_key(
+        self, forum_id: int, user_id: int, encrypted_aes_key: bytes, key_version: int
+    ) -> None:
+        """Guarda a AES key do forum cifrada com a RSA publica de um membro."""
+        with self._lock:
+            self._conn.execute(
+                """INSERT OR REPLACE INTO forum_keys
+                   (forum_id, user_id, encrypted_aes_key, key_version)
+                   VALUES (?, ?, ?, ?)""",
+                (forum_id, user_id, encrypted_aes_key, key_version),
+            )
+            self._conn.commit()
+
+    def get_forum_key(self, forum_id: int, user_id: int, key_version: int) -> sqlite3.Row | None:
+        with self._lock:
+            return self._conn.execute(
+                "SELECT * FROM forum_keys WHERE forum_id = ? AND user_id = ? AND key_version = ?",
+                (forum_id, user_id, key_version),
+            ).fetchone()
+
+    def get_current_key_version(self, forum_id: int) -> int:
+        """Maior key_version ja distribuida para o forum (0 se nenhuma ainda)."""
+        with self._lock:
+            row = self._conn.execute(
+                "SELECT MAX(key_version) AS v FROM forum_keys WHERE forum_id = ?",
+                (forum_id,),
+            ).fetchone()
+            return row["v"] if row and row["v"] is not None else 0
+
+    # --- messages (forum) -------------------------------------------------------
+
+    def save_message(
+        self,
+        uuid: str,
+        forum_id: int,
+        sender_id: int,
+        ciphertext: bytes,
+        iv: bytes,
+        key_version: int,
+    ) -> int:
+        """Persiste uma mensagem de forum ja cifrada. O servidor nunca decifra."""
+        with self._lock:
+            cursor = self._conn.execute(
+                """INSERT INTO messages (uuid, forum_id, sender_id, ciphertext, iv, key_version)
+                   VALUES (?, ?, ?, ?, ?, ?)""",
+                (uuid, forum_id, sender_id, ciphertext, iv, key_version),
+            )
+            self._conn.commit()
+            return cursor.lastrowid
+
+    def get_messages_for_forum(self, forum_id: int) -> list[sqlite3.Row]:
+        """Historico completo do forum, em ordem cronologica."""
+        with self._lock:
+            return self._conn.execute(
+                "SELECT messages.*, users.username AS sender_username FROM messages "
+                "JOIN users ON users.id = messages.sender_id "
+                "WHERE messages.forum_id = ? ORDER BY messages.id ASC",
+                (forum_id,),
+            ).fetchall()
+
     def close(self) -> None:
         self._conn.close()

@@ -52,7 +52,7 @@ Sábados (11 e 18) = off (D&D).
 
 ## ✅ Estado atual
 
-**Data:** 08/07/2026 — **Dia 5 da Sprint 1 (Fóruns) concluído.**
+**Data:** 08/07/2026 — **Dia 6 da Sprint 1 (E2E em grupo) concluído.**
 
 - [x] `README.md` pronto
 - [x] `DEVELOPMENT.md` pronto (guia de sprints)
@@ -66,37 +66,41 @@ Sábados (11 e 18) = off (D&D).
 - [x] **Dia 3 — Autenticação** (`database.py` schema completo, `handlers/auth.py`, `Router` com `db`, `test_auth.py`) — 9 testes ✅
 - [x] **Dia 4 — E2E 1:1** (`CMD_UPDATE_PUBKEY`/`CMD_GET_PUBKEY` em `handlers/key_exchange.py`, `CMD_MSG_1V1` em `handlers/message.py`, tabela `direct_messages`, `client/storage/key_vault.py`, `cli_test.py` com `/register /login /dm`, `tests/test_e2e.py` + `tests/test_key_vault.py`) — 15 testes ✅
 - [x] **Dia 5 — Fóruns** (`handlers/forum.py` completo: `create_forum`/`join_forum`/`leave_forum`/`list_my_forums`, códigos `CORVO-XXXX-XXXX` com SHA-256 hash, métodos de DB `create_forum`/`get_forum_by_invite_hash`/`add_member`/`remove_member`/`is_member`/`get_forum_members`/`get_forums_for_user`, eventos `MEMBER_JOINED`/`MEMBER_LEFT`, `cli_test.py` com `/create /join /leave /list`, `tests/test_forum.py`) — 13 testes ✅
+- [x] **Dia 6 — E2E em grupo** (`handle_distribute_key` em `handlers/key_exchange.py`, `handle_send_to_forum`/`handle_get_history` em `handlers/message.py`, tabelas `forum_keys`/`messages` com métodos de DB completos, rotação de chave ao sair via `MEMBER_LEFT` com `remaining_members`, `cli_test.py` com `/send /history` + distribuição/rotação automática quando o usuário logado é dono, `tests/test_group_e2e.py`) — 9 testes ✅
 - [x] venv de pé (Python **3.14.0**) com deps instaladas
 
-**Ambiente rodando:** 62/62 testes passando (`.\venv\Scripts\python.exe -m pytest`).
-**Validado manualmente:** servidor real + 2 clientes TCP — DM cifrada ponta a ponta (Dia 4) e ciclo completo de fórum: criar → convite → join → notificação em tempo real → list → leave → notificação (Dia 5).
+**Ambiente rodando:** 71/71 testes passando (`.\venv\Scripts\python.exe -m pytest`).
+**Validado manualmente:** servidor real + múltiplos clientes TCP — DM cifrada ponta a ponta (Dia 4), ciclo completo de fórum (Dia 5), e fluxo de grupo com 3 membros: criar fórum → distribuir chave v1 → mensagens circulando → um membro sai → dono rotaciona pra v2 → só quem ficou decifra a nova mensagem (Dia 6).
 
 ---
 
 ## 🚀 Próximos passos imediatos (ordem)
 
-**Próximo: Dia 6 — E2E em grupo (chave AES por fórum, distribuição via RSA, rotação ao sair).**
+**Próximo: Dia 7 — Sistema de Roles (permissões bitmask).**
 
-1. `shared/models.py`: dataclasses `Forum`, `ForumMember`, `Message` (ainda vazio).
-2. Ao criar/entrar num fórum: dono gera uma chave AES do fórum, cifra com a RSA pública de cada membro, envia via `CMD_DISTRIBUTE_KEY` → servidor guarda em `forum_keys` (tabela já existe no schema) por `(forum_id, user_id, key_version)`.
-3. Handler `send` em `handlers/message.py`: persiste `ciphertext`+`iv`+`key_version` na tabela `messages` (já existe no schema) e faz broadcast `EVT_NEW_MESSAGE` só pros membros online.
-4. Handler `history` (`CMD_GET_HISTORY`): retorna mensagens do fórum pro cliente decifrar localmente com a key_version correspondente.
-5. **Rotação de chave ao sair** (`handle_leave_forum` já tem o TODO marcado): ao alguém sair, o fórum precisa de uma nova key_version — o dono (ou quem ficou) gera nova AES key, redistribui pros membros restantes, servidor incrementa `key_version` e dispara `EVT_KEY_ROTATED`.
-6. CLI: comandos `/send <forum_id> <msg>` e `/history <forum_id>`.
-7. **Commit alvo:** `feat: E2E em grupo com rotação de chave AES por fórum`.
+1. `shared/permissions.py`: classe `Permission` com bitmask (`SEND_MESSAGE=1`, `DELETE_MESSAGE=2`, `PIN_MESSAGE=4`, `SEND_IMAGE=8`, `CREATE_CHANNEL=16`, `KICK_MEMBER=32`, `BAN_MEMBER=64`, `MANAGE_ROLES=128`, `MANAGE_FORUM=256`, `ALL=511`) — arquivo ainda vazio.
+2. Tabelas `roles`/`member_roles` já existem no schema (`server/database.py`); faltam os métodos de acesso (`create_role`, `get_roles_for_forum`, `assign_role`, `get_member_permissions`, etc.).
+3. Roles padrão ao criar um fórum: `Corvo-Mor` (ALL, automática pro dono), `Escriba` (SEND+DELETE+PIN+KICK), `Iniciado` (SEND).
+4. Handlers em `handlers/role.py` (hoje só esqueleto): `create_role`, `edit_role`, `delete_role`, `assign_role`, `revoke_role`.
+5. Toda ação sensível (pin/delete de mensagem, kick, etc.) deve checar a permissão bitmask no servidor **antes** de executar — inclusive retroativo aos TODOs deixados em `handlers/message.py` (pin/delete).
+6. Testes: dono edita role com sucesso; membro sem `MANAGE_ROLES` tenta e é negado.
+7. **Commit alvo:** `feat: sistema de roles customizáveis com permissões bitmask`.
+
+**🏁 Isso fecha a Sprint 1** (marco: chat E2E multi-sala funcionando em CLI). Depois disso começa a Sprint 2 (interface) — ver a nota sobre o design de UI já feito no Claude Design, a ser revisitado no Dia 8.
 
 ### O que já está pronto e reutilizável
 
 - `crypto_utils`: hash/verify de senha, RSA-2048 OAEP, AES-256-CBC, PBKDF2, `public_key_from_private`. **16 testes.**
-- `protocol`: framing `[4B tamanho][JSON]`, constantes de todos os comandos (`CMD_GET_PUBKEY`, `CMD_UPDATE_PUBKEY`, `CMD_MSG_1V1`, `EVT_NEW_DM` inclusos), helpers `make_request/make_response/make_event`. **Testado.**
+- `protocol`: framing `[4B tamanho][JSON]`, constantes de todos os comandos (`CMD_GET_PUBKEY`, `CMD_UPDATE_PUBKEY`, `CMD_MSG_1V1`, `CMD_DISTRIBUTE_KEY`, `CMD_SEND_TO_FORUM`, `CMD_GET_HISTORY`, `EVT_NEW_DM`, `EVT_KEY_ROTATED` inclusos), helpers `make_request/make_response/make_event`. **Testado.**
 - `SessionManager`: mapa socket→sessão thread-safe, unicast/broadcast, `send_to_user` (roteia só se online), autenticação de sessão.
-- `Router`: despacho `cmd → handler` com `register()`; handlers embutidos `PING`/`ECHO` + auth + key_exchange + message.
+- `Router`: despacho `cmd → handler` com `register()`; handlers embutidos `PING`/`ECHO` + auth + key_exchange + message + forum.
 - `CorvoServer`: TCP threaded (1 thread/cliente), testado com múltiplos clientes simultâneos.
 - `CorvoClient`: connect/send/close + thread de recv → `inbox` (queue).
 - `key_vault`: salva/carrega a private key RSA cifrada (PBKDF2 → AES-256) em `~/.corvo_negro/keys/<user>.key`.
 - Mensagens 1:1 (`MSG_1V1`): fluxo híbrido RSA+AES completo, servidor só persiste/roteia ciphertext em `direct_messages`.
-- Fóruns: criação com convite `CORVO-XXXX-XXXX` (hash SHA-256, código nunca fica em claro no DB), join/leave/list, notificações `MEMBER_JOINED`/`MEMBER_LEFT` só pros membros online.
-- `cli_test`: `python -m client.cli_test` (`/register`, `/login`, `/dm`, `/create`, `/join`, `/leave`, `/list`, `/ping`, `/echo`, `/raw`, `/quit`) — decifra `NEW_DM` automaticamente se a chave privada estiver carregada.
+- Fóruns: criação com convite `CORVO-XXXX-XXXX` (hash SHA-256, código nunca fica em claro no DB), join/leave/list, notificações `MEMBER_JOINED`/`MEMBER_LEFT` (com `owner_id`/`remaining_members`) só pros membros online.
+- E2E em grupo: chave AES por fórum controlada pelo dono (`DISTRIBUTE_KEY`), mensagens de fórum via `SEND_TO_FORUM`/`NEW_MESSAGE`, histórico via `GET_HISTORY` com `key_version` por mensagem, rotação de chave automática ao alguém sair.
+- `cli_test`: `python -m client.cli_test` (`/register`, `/login`, `/dm`, `/create`, `/join`, `/leave`, `/list`, `/send`, `/history`, `/ping`, `/echo`, `/raw`, `/quit`) — decifra `NEW_DM`/`NEW_MESSAGE` automaticamente e cuida da distribuição/rotação de chave quando o usuário logado é dono do fórum.
 
 ---
 

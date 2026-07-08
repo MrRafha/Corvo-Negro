@@ -69,7 +69,7 @@ def handle_create_forum(data: dict, ctx: HandlerContext) -> dict:
         "CREATE_FORUM_RESPONSE",
         protocol.STATUS_OK,
         message="forum criado com sucesso",
-        data={"forum_id": forum_id, "name": name, "invite_code": invite_code},
+        data={"forum_id": forum_id, "name": name, "invite_code": invite_code, "owner_id": session["user_id"]},
     )
 
 
@@ -101,7 +101,11 @@ def handle_join_forum(data: dict, ctx: HandlerContext) -> dict:
     member_ids = {row["id"] for row in ctx.db.get_forum_members(forum_row["id"])}
     event = protocol.make_event(
         protocol.EVT_MEMBER_JOINED,
-        data={"forum_id": forum_row["id"], "username": session["username"]},
+        data={
+            "forum_id": forum_row["id"],
+            "username": session["username"],
+            "owner_id": forum_row["owner_id"],
+        },
     )
     ctx.sessions.broadcast_to_users(member_ids, event, exclude=ctx.sock)
 
@@ -109,7 +113,7 @@ def handle_join_forum(data: dict, ctx: HandlerContext) -> dict:
         "JOIN_FORUM_RESPONSE",
         protocol.STATUS_OK,
         message="entrou no forum com sucesso",
-        data={"forum_id": forum_row["id"], "name": forum_row["name"]},
+        data={"forum_id": forum_row["id"], "name": forum_row["name"], "owner_id": forum_row["owner_id"]},
     )
 
 
@@ -132,11 +136,20 @@ def handle_leave_forum(data: dict, ctx: HandlerContext) -> dict:
 
     ctx.db.remove_member(forum_id, session["user_id"])
 
-    # TODO(Sprint 1, Dia 6): disparar rotacao da chave AES do forum (EVT_KEY_ROTATED).
-    remaining_ids = {row["id"] for row in ctx.db.get_forum_members(forum_id)}
+    # A rotacao de chave e responsabilidade do CLIENTE do dono: ao receber o
+    # MEMBER_LEFT abaixo (que ja inclui quem restou no forum), ele gera uma
+    # nova AES key, incrementa key_version e redistribui via CMD_DISTRIBUTE_KEY
+    # para cada membro restante. O servidor nunca gera nem ve a chave em claro.
+    remaining_members = ctx.db.get_forum_members(forum_id)
+    remaining_ids = {row["id"] for row in remaining_members}
     event = protocol.make_event(
         protocol.EVT_MEMBER_LEFT,
-        data={"forum_id": forum_id, "username": session["username"]},
+        data={
+            "forum_id": forum_id,
+            "username": session["username"],
+            "owner_id": forum_row["owner_id"],
+            "remaining_members": [row["username"] for row in remaining_members],
+        },
     )
     ctx.sessions.broadcast_to_users(remaining_ids, event)
 
@@ -152,7 +165,7 @@ def handle_list_my_forums(data: dict, ctx: HandlerContext) -> dict:
         return err
 
     forums = [
-        {"forum_id": row["id"], "name": row["name"]}
+        {"forum_id": row["id"], "name": row["name"], "owner_id": row["owner_id"]}
         for row in ctx.db.get_forums_for_user(session["user_id"])
     ]
     return protocol.make_response(
