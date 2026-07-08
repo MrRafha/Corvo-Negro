@@ -64,7 +64,7 @@ def test_unpack_message_multiplas_mensagens_em_sequencia():
 @pytest.fixture
 def servidor():
     """Sobe um CorvoServer em porta efemera e o encerra ao fim do teste."""
-    server = CorvoServer(host="127.0.0.1", port=0)
+    server = CorvoServer(host="127.0.0.1", port=0, db_path=":memory:")
     # bind manual em porta 0 para descobrir a porta atribuida pelo SO.
     server._server_sock = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
     server._server_sock.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)

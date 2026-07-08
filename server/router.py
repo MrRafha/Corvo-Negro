@@ -21,6 +21,7 @@ from typing import Callable
 
 from shared import protocol
 from server.session_manager import SessionManager
+from server.database import Database
 
 Handler = Callable[[dict, "HandlerContext"], "dict | None"]
 
@@ -30,13 +31,16 @@ class HandlerContext:
     """Contexto passado a cada handler."""
     sock: socket.socket
     sessions: SessionManager
+    db: Database
 
 
 class Router:
-    def __init__(self, sessions: SessionManager) -> None:
+    def __init__(self, sessions: SessionManager, db: Database) -> None:
         self.sessions = sessions
+        self.db = db
         self._handlers: dict[str, Handler] = {}
         self._register_builtin()
+        self._register_auth()
 
     def register(self, cmd: str, handler: Handler) -> None:
         """Registra o handler de um comando."""
@@ -53,7 +57,7 @@ class Router:
                 protocol.STATUS_ERROR,
                 message=f"comando desconhecido: {cmd!r}",
             )
-        ctx = HandlerContext(sock=sock, sessions=self.sessions)
+        ctx = HandlerContext(sock=sock, sessions=self.sessions, db=self.db)
         return handler(data, ctx)
 
     # --- handlers embutidos (uteis antes dos handlers de dominio existirem) ---
@@ -61,6 +65,12 @@ class Router:
     def _register_builtin(self) -> None:
         self.register("PING", self._handle_ping)
         self.register("ECHO", self._handle_echo)
+
+    def _register_auth(self) -> None:
+        from server.handlers.auth import handle_register, handle_login, handle_logout
+        self.register(protocol.CMD_REGISTER, handle_register)
+        self.register(protocol.CMD_LOGIN, handle_login)
+        self.register(protocol.CMD_LOGOUT, handle_logout)
 
     @staticmethod
     def _handle_ping(_data: dict, _ctx: HandlerContext) -> dict:

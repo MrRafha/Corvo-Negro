@@ -16,16 +16,19 @@ import threading
 
 from shared import protocol
 from server import config
+from server.database import Database
 from server.router import Router
 from server.session_manager import SessionManager
 
 
 class CorvoServer:
-    def __init__(self, host: str = config.HOST, port: int = config.PORT) -> None:
+    def __init__(self, host: str = config.HOST, port: int = config.PORT, db_path: str = config.DB_PATH) -> None:
         self.host = host
         self.port = port
+        self.db = Database(db_path)
+        self.db.init_schema()
         self.sessions = SessionManager()
-        self.router = Router(self.sessions)
+        self.router = Router(self.sessions, self.db)
         self._server_sock: socket.socket | None = None
         self._running = threading.Event()
 
