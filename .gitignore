@@ -17,6 +17,8 @@ ENV/
 
 # === Segredos e dados sensiveis (NUNCA committar) ===
 *.db
+*.db-shm
+*.db-wal
 *.sqlite
 *.sqlite3
 *.key

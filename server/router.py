@@ -41,6 +41,8 @@ class Router:
         self._handlers: dict[str, Handler] = {}
         self._register_builtin()
         self._register_auth()
+        self._register_key_exchange()
+        self._register_message()
 
     def register(self, cmd: str, handler: Handler) -> None:
         """Registra o handler de um comando."""
@@ -71,6 +73,15 @@ class Router:
         self.register(protocol.CMD_REGISTER, handle_register)
         self.register(protocol.CMD_LOGIN, handle_login)
         self.register(protocol.CMD_LOGOUT, handle_logout)
+
+    def _register_key_exchange(self) -> None:
+        from server.handlers.key_exchange import handle_update_pubkey, handle_get_pubkey
+        self.register(protocol.CMD_UPDATE_PUBKEY, handle_update_pubkey)
+        self.register(protocol.CMD_GET_PUBKEY, handle_get_pubkey)
+
+    def _register_message(self) -> None:
+        from server.handlers.message import handle_msg_1v1
+        self.register(protocol.CMD_MSG_1V1, handle_msg_1v1)
 
     @staticmethod
     def _handle_ping(_data: dict, _ctx: HandlerContext) -> dict:

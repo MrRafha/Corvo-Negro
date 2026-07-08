@@ -1,13 +1,14 @@
 """Schema e queries SQLite do servidor.
 
 Tabelas criadas ao longo da Sprint 1:
-    users        (Dia 3)
-    forums       (Dia 5)
-    forum_members(Dia 5)
-    forum_keys   (Dia 6)
-    messages     (Dia 6)
-    roles        (Dia 7)
-    member_roles (Dia 7)
+    users            (Dia 3)
+    direct_messages  (Dia 4)
+    forums           (Dia 5)
+    forum_members    (Dia 5)
+    forum_keys       (Dia 6)
+    messages         (Dia 6)
+    roles            (Dia 7)
+    member_roles     (Dia 7)
 
 Regra de ouro: o servidor guarda apenas ciphertext. Nunca texto em claro.
 
@@ -46,6 +47,19 @@ class Database:
                     password_hash BLOB    NOT NULL,
                     public_key    BLOB    NOT NULL DEFAULT '',
                     created_at    TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+                );
+
+                CREATE TABLE IF NOT EXISTS direct_messages (
+                    id             INTEGER PRIMARY KEY AUTOINCREMENT,
+                    uuid           TEXT    UNIQUE NOT NULL,
+                    sender_id      INTEGER NOT NULL,
+                    recipient_id   INTEGER NOT NULL,
+                    ciphertext     BLOB    NOT NULL,
+                    encrypted_key  BLOB    NOT NULL,
+                    iv             BLOB    NOT NULL,
+                    timestamp      TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+                    FOREIGN KEY (sender_id)    REFERENCES users(id),
+                    FOREIGN KEY (recipient_id) REFERENCES users(id)
                 );
 
                 CREATE TABLE IF NOT EXISTS forums (
@@ -147,6 +161,28 @@ class Database:
                 "UPDATE users SET public_key = ? WHERE id = ?", (public_key, user_id)
             )
             self._conn.commit()
+
+    # --- direct_messages --------------------------------------------------------
+
+    def save_direct_message(
+        self,
+        uuid: str,
+        sender_id: int,
+        recipient_id: int,
+        ciphertext: bytes,
+        encrypted_key: bytes,
+        iv: bytes,
+    ) -> int:
+        """Persiste uma mensagem 1:1 ja cifrada. O servidor nunca ve o texto claro."""
+        with self._lock:
+            cursor = self._conn.execute(
+                """INSERT INTO direct_messages
+                   (uuid, sender_id, recipient_id, ciphertext, encrypted_key, iv)
+                   VALUES (?, ?, ?, ?, ?, ?)""",
+                (uuid, sender_id, recipient_id, ciphertext, encrypted_key, iv),
+            )
+            self._conn.commit()
+            return cursor.lastrowid
 
     def close(self) -> None:
         self._conn.close()

@@ -9,6 +9,7 @@ API publica:
     hash_password(password) -> bytes                     # salt(16B) + hash(32B)
     verify_password(password, stored) -> bool
     generate_rsa_keypair() -> tuple[bytes, bytes]        # (priv_pem, pub_pem)
+    public_key_from_private(private_key_pem) -> bytes    # re-deriva a pub key
     rsa_encrypt(data, public_key_pem) -> bytes
     rsa_decrypt(ciphertext, private_key_pem) -> bytes
     aes_encrypt(plaintext, key) -> tuple[bytes, bytes]   # (ciphertext, iv)
@@ -115,6 +116,19 @@ def generate_rsa_keypair() -> tuple[bytes, bytes]:
         format=serialization.PublicFormat.SubjectPublicKeyInfo,
     )
     return private_pem, public_pem
+
+
+def public_key_from_private(private_key_pem: bytes) -> bytes:
+    """Deriva a public key PEM a partir de uma private key PEM existente.
+
+    Usada quando a private key ja esta salva localmente (key_vault) e so
+    precisamos re-derivar a public key para reenviar ao servidor.
+    """
+    private_key = serialization.load_pem_private_key(private_key_pem, password=None)
+    return private_key.public_key().public_bytes(
+        encoding=serialization.Encoding.PEM,
+        format=serialization.PublicFormat.SubjectPublicKeyInfo,
+    )
 
 
 def _oaep() -> asym_padding.OAEP:

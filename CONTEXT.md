@@ -52,7 +52,7 @@ Sábados (11 e 18) = off (D&D).
 
 ## ✅ Estado atual
 
-**Data:** 07/07/2026 — **Dia 1 da Sprint 1 (Setup + Crypto Utils).**
+**Data:** 08/07/2026 — **Dia 4 da Sprint 1 (E2E 1:1) concluído.**
 
 - [x] `README.md` pronto
 - [x] `DEVELOPMENT.md` pronto (guia de sprints)
@@ -64,38 +64,39 @@ Sábados (11 e 18) = off (D&D).
 - [x] **Dia 1 — `shared/crypto_utils.py` + `tests/test_crypto.py`** (16 testes ✅)
 - [x] **Dia 2 — Socket TCP + Protocolo** (`protocol.py`, `session_manager.py`, `router.py`, `server/main.py`, `client_socket.py`, `cli_test.py`) — 9 testes ✅
 - [x] **Dia 3 — Autenticação** (`database.py` schema completo, `handlers/auth.py`, `Router` com `db`, `test_auth.py`) — 9 testes ✅
+- [x] **Dia 4 — E2E 1:1** (`CMD_UPDATE_PUBKEY`/`CMD_GET_PUBKEY` em `handlers/key_exchange.py`, `CMD_MSG_1V1` em `handlers/message.py`, tabela `direct_messages`, `client/storage/key_vault.py`, `cli_test.py` com `/register /login /dm`, `tests/test_e2e.py` + `tests/test_key_vault.py`) — 15 testes ✅
 - [x] venv de pé (Python **3.14.0**) com deps instaladas
 
-**Ambiente rodando:** 34/34 testes passando (`.\venv\Scripts\python.exe -m pytest`).
+**Ambiente rodando:** 49/49 testes passando (`.\venv\Scripts\python.exe -m pytest`).
+**Validado manualmente:** servidor real + 2 clientes TCP trocando DM cifrada ponta a ponta (Alice cifra com a pubkey do Bob, servidor só roteia, Bob decifra e recupera o texto original).
 
 ---
 
 ## 🚀 Próximos passos imediatos (ordem)
 
-**Próximo: Dia 4 — E2E 1:1 (mensagens diretas com criptografia híbrida RSA+AES).**
+**Próximo: Dia 5 — Fóruns (criação, convite por hash, membership).**
 
-1. No login, cliente **gera par RSA** localmente e envia `public_key` ao servidor → `update_public_key()` no DB.
-2. Novo handler `CMD_GET_PUBKEY(username)` — servidor devolve a public key PEM de outro user.
-3. Registrar `GET_PUBKEY` no router.
-4. Comando `CMD_MSG_1V1` no servidor (só roteia, não decifra):
-   - Remetente pede pubkey do destinatário
-   - Gera AES key aleatória
-   - Cifra mensagem com AES-CBC
-   - Cifra a AES key com RSA-OAEP do destinatário
-   - Envia `{recipient, ciphertext, encrypted_key, iv, sender}`
-5. Destinatário: decifra AES key com RSA privada, decifra msg com AES.
-6. `client/storage/key_vault.py` — salvar/carregar priv key cifrada com a senha (PBKDF2 → AES-256).
-7. **Commit alvo:** `feat: mensagens 1:1 com criptografia híbrida RSA+AES`.
+1. `shared/models.py`: dataclasses `Forum`, `ForumMember` (ainda vazio, previsto pra este dia).
+2. Handler `create_forum`: cliente envia nome → servidor gera código de convite (`CORVO-XXXX-XXXX`), guarda `SHA-256(código)` em `forums.invite_hash`, devolve o código em claro pro dono compartilhar.
+3. Handler `join_forum`: cliente envia código → servidor compara hash → insere em `forum_members`.
+4. Handler `list_my_forums` e `leave_forum`.
+5. Registrar os 4 comandos no router (`CMD_CREATE_FORUM`, `CMD_JOIN_FORUM`, `CMD_LEAVE_FORUM`, `CMD_LIST_MY_FORUMS` já existem em `protocol.py`).
+6. CLI: comandos `/create`, `/join`, `/list`, `/leave`.
+7. **Commit alvo:** `feat: sistema de fóruns com convites por hash`.
+
+Tabelas `forums`/`forum_members` já existem no schema (`server/database.py`), faltam os métodos de acesso (`create_forum`, `get_forum_by_invite_hash`, `add_member`, etc.) e os handlers.
 
 ### O que já está pronto e reutilizável
 
-- `crypto_utils`: hash/verify de senha, RSA-2048 OAEP, AES-256-CBC, PBKDF2. **16 testes.**
-- `protocol`: framing `[4B tamanho][JSON]`, constantes de todos os comandos, helpers `make_request/make_response/make_event`. **Testado.**
-- `SessionManager`: mapa socket→sessão thread-safe, unicast/broadcast, autenticação de sessão.
-- `Router`: despacho `cmd → handler` com `register()`; handlers embutidos `PING`/`ECHO`.
-- `CorvoServer`: TCP threaded (1 thread/cliente), testado com 3 clientes simultâneos.
+- `crypto_utils`: hash/verify de senha, RSA-2048 OAEP, AES-256-CBC, PBKDF2, `public_key_from_private`. **16 testes.**
+- `protocol`: framing `[4B tamanho][JSON]`, constantes de todos os comandos (`CMD_GET_PUBKEY`, `CMD_UPDATE_PUBKEY`, `CMD_MSG_1V1`, `EVT_NEW_DM` inclusos), helpers `make_request/make_response/make_event`. **Testado.**
+- `SessionManager`: mapa socket→sessão thread-safe, unicast/broadcast, `send_to_user` (roteia só se online), autenticação de sessão.
+- `Router`: despacho `cmd → handler` com `register()`; handlers embutidos `PING`/`ECHO` + auth + key_exchange + message.
+- `CorvoServer`: TCP threaded (1 thread/cliente), testado com múltiplos clientes simultâneos.
 - `CorvoClient`: connect/send/close + thread de recv → `inbox` (queue).
-- `cli_test`: `python -m client.cli_test` (`/ping`, `/echo`, `/raw`, `/quit`).
+- `key_vault`: salva/carrega a private key RSA cifrada (PBKDF2 → AES-256) em `~/.corvo_negro/keys/<user>.key`.
+- Mensagens 1:1 (`MSG_1V1`): fluxo híbrido RSA+AES completo, servidor só persiste/roteia ciphertext em `direct_messages`.
+- `cli_test`: `python -m client.cli_test` (`/register`, `/login`, `/dm`, `/ping`, `/echo`, `/raw`, `/quit`) — decifra `NEW_DM` automaticamente se a chave privada estiver carregada.
 
 ---
 
