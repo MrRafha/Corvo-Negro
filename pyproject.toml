@@ -1,0 +1,5 @@
+[tool.pytest.ini_options]
+# Garante que a raiz do projeto esteja no sys.path, para que os testes
+# possam importar os pacotes `shared`, `server` e `client`.
+pythonpath = ["."]
+testpaths = ["tests"]
