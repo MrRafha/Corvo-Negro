@@ -41,17 +41,22 @@
 | `JOIN_FORUM` | C→S | Entrar via código de convite |
 | `LEAVE_FORUM` | C→S | Sair do fórum |
 | `LIST_MY_FORUMS` | C→S | Listar fóruns do usuário |
+| `GET_FORUM_MEMBERS` | C→S | Listar membros de um fórum com suas roles (p/ GUI) |
 | `DISTRIBUTE_KEY` | C→S | Dono envia a AES do fórum cifrada para um membro |
 | `SEND_TO_FORUM` | C→S | Enviar mensagem cifrada com a AES do fórum |
 | `GET_HISTORY` | C→S | Puxar histórico do fórum |
 | `SYNC_MESSAGES` | C→S | Sync após modo LAN |
-| `CREATE_ROLE` | C→S | Criar role |
-| `ASSIGN_ROLE` | C→S | Atribuir role a membro |
+| `CREATE_ROLE` | C→S | Criar role customizada (requer `MANAGE_ROLES`) |
+| `ASSIGN_ROLE` | C→S | Atribuir role a membro (requer `MANAGE_ROLES`) |
+| `PIN_MESSAGE` | C→S | Fixar/desafixar mensagem de fórum (requer `PIN_MESSAGE`) |
+| `DELETE_MESSAGE` | C→S | Apagar mensagem (autor ou `DELETE_MESSAGE`) |
 | `NEW_MESSAGE` | S→C | Broadcast de nova mensagem de fórum |
 | `NEW_DM` | S→C | Notifica mensagem direta recebida |
 | `MEMBER_JOINED` | S→C | Notifica novo membro (inclui `owner_id`) |
 | `MEMBER_LEFT` | S→C | Notifica saída — inclui `owner_id` e `remaining_members` p/ o dono rotacionar a chave |
 | `KEY_ROTATED` | S→C | Entrega/rotação da AES do fórum, cifrada com a RSA do destinatário |
+| `MESSAGE_PINNED` | S→C | Notifica fixação/desafixação de mensagem |
+| `MESSAGE_DELETED` | S→C | Notifica remoção de mensagem |
 
 ## E2E em grupo (chave por fórum)
 
@@ -73,3 +78,21 @@ distribuição é sempre o **dono**:
    (`NEW_MESSAGE`), sem decifrar. O histórico (`GET_HISTORY`) devolve as
    mensagens com a `key_version` de cada uma, para o cliente decifrar
    localmente com a chave correspondente.
+
+## Roles e permissões (bitmask)
+
+Cada fórum tem roles com uma máscara de bits (`shared/permissions.py`,
+`Permission.SEND_MESSAGE=1`, `DELETE_MESSAGE=2`, `PIN_MESSAGE=4`,
+`SEND_IMAGE=8`, `CREATE_CHANNEL=16`, `KICK_MEMBER=32`, `BAN_MEMBER=64`,
+`MANAGE_ROLES=128`, `MANAGE_FORUM=256`, `ALL=511`). Um membro pode ter várias
+roles — a permissão efetiva é o OR de todas as máscaras.
+
+Ao criar um fórum (`CREATE_FORUM`), três roles padrão são criadas
+automaticamente: `Corvo-Mor` (`ALL`, atribuída ao dono), `Escriba`
+(`SEND_MESSAGE|DELETE_MESSAGE|PIN_MESSAGE|KICK_MEMBER`) e `Iniciado`
+(`SEND_MESSAGE`, atribuída a todo novo membro que entra via `JOIN_FORUM`).
+
+Toda ação sensível é checada no **servidor** antes de executar:
+`CREATE_ROLE`/`ASSIGN_ROLE` exigem `MANAGE_ROLES`; `PIN_MESSAGE` exige
+`PIN_MESSAGE`; `DELETE_MESSAGE` é permitido ao autor da mensagem ou a quem
+tiver `DELETE_MESSAGE`.

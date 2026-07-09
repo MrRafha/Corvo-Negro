@@ -44,6 +44,7 @@ class Router:
         self._register_key_exchange()
         self._register_message()
         self._register_forum()
+        self._register_role()
 
     def register(self, cmd: str, handler: Handler) -> None:
         """Registra o handler de um comando."""
@@ -86,10 +87,18 @@ class Router:
         self.register(protocol.CMD_DISTRIBUTE_KEY, handle_distribute_key)
 
     def _register_message(self) -> None:
-        from server.handlers.message import handle_msg_1v1, handle_send_to_forum, handle_get_history
+        from server.handlers.message import (
+            handle_msg_1v1,
+            handle_send_to_forum,
+            handle_get_history,
+            handle_pin_message,
+            handle_delete_message,
+        )
         self.register(protocol.CMD_MSG_1V1, handle_msg_1v1)
         self.register(protocol.CMD_SEND_TO_FORUM, handle_send_to_forum)
         self.register(protocol.CMD_GET_HISTORY, handle_get_history)
+        self.register(protocol.CMD_PIN_MESSAGE, handle_pin_message)
+        self.register(protocol.CMD_DELETE_MESSAGE, handle_delete_message)
 
     def _register_forum(self) -> None:
         from server.handlers.forum import (
@@ -97,11 +106,37 @@ class Router:
             handle_join_forum,
             handle_leave_forum,
             handle_list_my_forums,
+            handle_get_forum_members,
+            handle_regenerate_invite,
+            handle_update_forum,
+            handle_delete_forum,
+            handle_kick_member,
+            handle_ban_member,
         )
         self.register(protocol.CMD_CREATE_FORUM, handle_create_forum)
         self.register(protocol.CMD_JOIN_FORUM, handle_join_forum)
         self.register(protocol.CMD_LEAVE_FORUM, handle_leave_forum)
         self.register(protocol.CMD_LIST_MY_FORUMS, handle_list_my_forums)
+        self.register(protocol.CMD_GET_FORUM_MEMBERS, handle_get_forum_members)
+        self.register(protocol.CMD_REGENERATE_INVITE, handle_regenerate_invite)
+        self.register(protocol.CMD_UPDATE_FORUM, handle_update_forum)
+        self.register(protocol.CMD_DELETE_FORUM, handle_delete_forum)
+        self.register(protocol.CMD_KICK_MEMBER, handle_kick_member)
+        self.register(protocol.CMD_BAN_MEMBER, handle_ban_member)
+
+    def _register_role(self) -> None:
+        from server.handlers.role import (
+            handle_list_roles,
+            handle_create_role,
+            handle_update_role,
+            handle_delete_role,
+            handle_assign_role,
+        )
+        self.register(protocol.CMD_LIST_ROLES, handle_list_roles)
+        self.register(protocol.CMD_CREATE_ROLE, handle_create_role)
+        self.register(protocol.CMD_UPDATE_ROLE, handle_update_role)
+        self.register(protocol.CMD_DELETE_ROLE, handle_delete_role)
+        self.register(protocol.CMD_ASSIGN_ROLE, handle_assign_role)
 
     @staticmethod
     def _handle_ping(_data: dict, _ctx: HandlerContext) -> dict:

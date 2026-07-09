@@ -65,6 +65,7 @@ class Database:
                 CREATE TABLE IF NOT EXISTS forums (
                     id          INTEGER PRIMARY KEY AUTOINCREMENT,
                     name        TEXT    NOT NULL,
+                    icon        TEXT    NOT NULL DEFAULT '⚔',
                     invite_hash BLOB    NOT NULL,
                     owner_id    INTEGER NOT NULL,
                     created_at  TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
@@ -75,6 +76,15 @@ class Database:
                     forum_id  INTEGER NOT NULL,
                     user_id   INTEGER NOT NULL,
                     joined_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+                    PRIMARY KEY (forum_id, user_id),
+                    FOREIGN KEY (forum_id) REFERENCES forums(id),
+                    FOREIGN KEY (user_id)  REFERENCES users(id)
+                );
+
+                CREATE TABLE IF NOT EXISTS forum_bans (
+                    forum_id  INTEGER NOT NULL,
+                    user_id   INTEGER NOT NULL,
+                    banned_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
                     PRIMARY KEY (forum_id, user_id),
                     FOREIGN KEY (forum_id) REFERENCES forums(id),
                     FOREIGN KEY (user_id)  REFERENCES users(id)
@@ -186,12 +196,12 @@ class Database:
 
     # --- forums -------------------------------------------------------------------
 
-    def create_forum(self, name: str, invite_hash: bytes, owner_id: int) -> int:
+    def create_forum(self, name: str, invite_hash: bytes, owner_id: int, icon: str = "⚔") -> int:
         """Cria um forum e ja adiciona o dono como membro. Retorna o forum_id."""
         with self._lock:
             cursor = self._conn.execute(
-                "INSERT INTO forums (name, invite_hash, owner_id) VALUES (?, ?, ?)",
-                (name, invite_hash, owner_id),
+                "INSERT INTO forums (name, invite_hash, owner_id, icon) VALUES (?, ?, ?, ?)",
+                (name, invite_hash, owner_id, icon),
             )
             forum_id = cursor.lastrowid
             self._conn.execute(
@@ -256,6 +266,62 @@ class Database:
                 (user_id,),
             ).fetchall()
 
+    def update_forum(self, forum_id: int, name: str | None = None, icon: str | None = None) -> None:
+        """Atualiza so os campos informados (None = mantem o valor atual)."""
+        current = self.get_forum_by_id(forum_id)
+        if current is None:
+            return
+        with self._lock:
+            self._conn.execute(
+                "UPDATE forums SET name = ?, icon = ? WHERE id = ?",
+                (
+                    name if name is not None else current["name"],
+                    icon if icon is not None else current["icon"],
+                    forum_id,
+                ),
+            )
+            self._conn.commit()
+
+    def update_invite_hash(self, forum_id: int, invite_hash: bytes) -> None:
+        with self._lock:
+            self._conn.execute(
+                "UPDATE forums SET invite_hash = ? WHERE id = ?", (invite_hash, forum_id)
+            )
+            self._conn.commit()
+
+    def delete_forum(self, forum_id: int) -> None:
+        """Apaga o forum e todos os dados relacionados (membros, chaves,
+        mensagens, roles, banimentos)."""
+        with self._lock:
+            self._conn.execute("DELETE FROM member_roles WHERE forum_id = ?", (forum_id,))
+            self._conn.execute("DELETE FROM roles WHERE forum_id = ?", (forum_id,))
+            self._conn.execute("DELETE FROM messages WHERE forum_id = ?", (forum_id,))
+            self._conn.execute("DELETE FROM forum_keys WHERE forum_id = ?", (forum_id,))
+            self._conn.execute("DELETE FROM forum_bans WHERE forum_id = ?", (forum_id,))
+            self._conn.execute("DELETE FROM forum_members WHERE forum_id = ?", (forum_id,))
+            self._conn.execute("DELETE FROM forums WHERE id = ?", (forum_id,))
+            self._conn.commit()
+
+    def ban_user(self, forum_id: int, user_id: int) -> None:
+        """Remove o membro e registra o banimento (impede reentrada via convite)."""
+        with self._lock:
+            self._conn.execute(
+                "INSERT OR IGNORE INTO forum_bans (forum_id, user_id) VALUES (?, ?)",
+                (forum_id, user_id),
+            )
+            self._conn.execute(
+                "DELETE FROM forum_members WHERE forum_id = ? AND user_id = ?", (forum_id, user_id)
+            )
+            self._conn.commit()
+
+    def is_banned(self, forum_id: int, user_id: int) -> bool:
+        with self._lock:
+            row = self._conn.execute(
+                "SELECT 1 FROM forum_bans WHERE forum_id = ? AND user_id = ?",
+                (forum_id, user_id),
+            ).fetchone()
+            return row is not None
+
     # --- forum_keys -----------------------------------------------------------
 
     def save_forum_key(
@@ -317,6 +383,133 @@ class Database:
                 "WHERE messages.forum_id = ? ORDER BY messages.id ASC",
                 (forum_id,),
             ).fetchall()
+
+    def get_message_by_uuid(self, uuid: str) -> sqlite3.Row | None:
+        with self._lock:
+            return self._conn.execute(
+                "SELECT * FROM messages WHERE uuid = ?", (uuid,)
+            ).fetchone()
+
+    def set_message_pinned(self, uuid: str, pinned: bool) -> None:
+        with self._lock:
+            self._conn.execute(
+                "UPDATE messages SET pinned = ? WHERE uuid = ?", (int(pinned), uuid)
+            )
+            self._conn.commit()
+
+    def delete_message(self, uuid: str) -> None:
+        with self._lock:
+            self._conn.execute("DELETE FROM messages WHERE uuid = ?", (uuid,))
+            self._conn.commit()
+
+    # --- roles ------------------------------------------------------------------
+
+    def create_role(
+        self, forum_id: int, name: str, color: str, permissions: int, priority: int = 0
+    ) -> int:
+        """Cria uma role no forum. Retorna o role_id."""
+        with self._lock:
+            cursor = self._conn.execute(
+                """INSERT INTO roles (forum_id, name, color, permissions, priority)
+                   VALUES (?, ?, ?, ?, ?)""",
+                (forum_id, name, color, permissions, priority),
+            )
+            self._conn.commit()
+            return cursor.lastrowid
+
+    def get_role_by_id(self, role_id: int) -> sqlite3.Row | None:
+        with self._lock:
+            return self._conn.execute(
+                "SELECT * FROM roles WHERE id = ?", (role_id,)
+            ).fetchone()
+
+    def get_role_by_name(self, forum_id: int, name: str) -> sqlite3.Row | None:
+        with self._lock:
+            return self._conn.execute(
+                "SELECT * FROM roles WHERE forum_id = ? AND name = ?", (forum_id, name)
+            ).fetchone()
+
+    def get_roles_for_forum(self, forum_id: int) -> list[sqlite3.Row]:
+        with self._lock:
+            return self._conn.execute(
+                "SELECT * FROM roles WHERE forum_id = ? ORDER BY priority DESC", (forum_id,)
+            ).fetchall()
+
+    def update_role(
+        self, role_id: int, name: str | None = None, color: str | None = None,
+        permissions: int | None = None, priority: int | None = None,
+    ) -> None:
+        """Atualiza so os campos informados (None = mantem o valor atual)."""
+        current = self.get_role_by_id(role_id)
+        if current is None:
+            return
+        with self._lock:
+            self._conn.execute(
+                "UPDATE roles SET name = ?, color = ?, permissions = ?, priority = ? WHERE id = ?",
+                (
+                    name if name is not None else current["name"],
+                    color if color is not None else current["color"],
+                    permissions if permissions is not None else current["permissions"],
+                    priority if priority is not None else current["priority"],
+                    role_id,
+                ),
+            )
+            self._conn.commit()
+
+    def delete_role(self, role_id: int) -> None:
+        with self._lock:
+            self._conn.execute("DELETE FROM member_roles WHERE role_id = ?", (role_id,))
+            self._conn.execute("DELETE FROM roles WHERE id = ?", (role_id,))
+            self._conn.commit()
+
+    def assign_role(self, forum_id: int, user_id: int, role_id: int) -> None:
+        """Atribui uma role a um membro. Idempotente."""
+        with self._lock:
+            self._conn.execute(
+                "INSERT OR IGNORE INTO member_roles (forum_id, user_id, role_id) VALUES (?, ?, ?)",
+                (forum_id, user_id, role_id),
+            )
+            self._conn.commit()
+
+    def revoke_role(self, forum_id: int, user_id: int, role_id: int) -> None:
+        with self._lock:
+            self._conn.execute(
+                "DELETE FROM member_roles WHERE forum_id = ? AND user_id = ? AND role_id = ?",
+                (forum_id, user_id, role_id),
+            )
+            self._conn.commit()
+
+    def get_roles_for_member(self, forum_id: int, user_id: int) -> list[sqlite3.Row]:
+        with self._lock:
+            return self._conn.execute(
+                "SELECT roles.* FROM roles "
+                "JOIN member_roles ON member_roles.role_id = roles.id "
+                "WHERE member_roles.forum_id = ? AND member_roles.user_id = ?",
+                (forum_id, user_id),
+            ).fetchall()
+
+    def get_members_for_role(self, role_id: int) -> list[sqlite3.Row]:
+        with self._lock:
+            return self._conn.execute(
+                "SELECT users.id, users.username FROM users "
+                "JOIN member_roles ON member_roles.user_id = users.id "
+                "WHERE member_roles.role_id = ?",
+                (role_id,),
+            ).fetchall()
+
+    def get_member_permission_mask(self, forum_id: int, user_id: int) -> int:
+        """OR de todas as permissions das roles do membro nesse forum."""
+        with self._lock:
+            rows = self._conn.execute(
+                "SELECT roles.permissions FROM roles "
+                "JOIN member_roles ON member_roles.role_id = roles.id "
+                "WHERE member_roles.forum_id = ? AND member_roles.user_id = ?",
+                (forum_id, user_id),
+            ).fetchall()
+            mask = 0
+            for row in rows:
+                mask |= row["permissions"]
+            return mask
 
     def close(self) -> None:
         self._conn.close()

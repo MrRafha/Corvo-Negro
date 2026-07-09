@@ -1,10 +1,10 @@
 """Handlers de mensagens.
 
-handle_msg_1v1       -> persiste e roteia mensagem direta cifrada (Dia 4, nao decifra)
-handle_send_to_forum -> persiste ciphertext e rotea para membros online (Dia 6, nao decifra)
-handle_get_history   -> retorna mensagens do forum com key_version correspondente (Dia 6)
-pin     -> fixar mensagem (checa permissao) (Dia 7)
-delete  -> apagar mensagem (checa permissao) (Dia 7)
+handle_msg_1v1        -> persiste e roteia mensagem direta cifrada (Dia 4, nao decifra)
+handle_send_to_forum  -> persiste ciphertext e rotea para membros online (Dia 6, nao decifra)
+handle_get_history    -> retorna mensagens do forum com key_version correspondente (Dia 6)
+handle_pin_message    -> fixa/desafixa mensagem, checa PIN_MESSAGE (Dia 7)
+handle_delete_message -> apaga mensagem, checa DELETE_MESSAGE ou autoria (Dia 7)
 """
 
 from __future__ import annotations
@@ -12,10 +12,8 @@ from __future__ import annotations
 import base64
 import uuid as uuid_lib
 
-from shared import protocol
+from shared import permissions, protocol
 from server.router import HandlerContext
-
-# TODO(Sprint 1, Dia 7): pin / delete (checagem de permissao).
 
 
 def handle_msg_1v1(data: dict, ctx: HandlerContext) -> dict:
@@ -193,3 +191,78 @@ def handle_get_history(data: dict, ctx: HandlerContext) -> dict:
     return protocol.make_response(
         "GET_HISTORY_RESPONSE", protocol.STATUS_OK, data={"forum_id": forum_id, "messages": messages}
     )
+
+
+def handle_pin_message(data: dict, ctx: HandlerContext) -> dict:
+    """Fixa ou desafixa uma mensagem de forum. Requer PIN_MESSAGE.
+
+    Espera data = {"uuid": str, "pinned": bool}.
+    """
+    session = ctx.sessions.get(ctx.sock)
+    if session is None or session.get("user_id") is None:
+        return protocol.make_response(
+            "PIN_MESSAGE_RESPONSE", protocol.STATUS_ERROR, message="nao autenticado"
+        )
+
+    msg_uuid = data.get("uuid")
+    pinned = bool(data.get("pinned", True))
+    message_row = ctx.db.get_message_by_uuid(msg_uuid) if msg_uuid else None
+    if message_row is None:
+        return protocol.make_response(
+            "PIN_MESSAGE_RESPONSE", protocol.STATUS_ERROR, message="mensagem nao encontrada"
+        )
+
+    forum_id = message_row["forum_id"]
+    mask = ctx.db.get_member_permission_mask(forum_id, session["user_id"])
+    if not permissions.has_permission(mask, permissions.Permission.PIN_MESSAGE):
+        return protocol.make_response(
+            "PIN_MESSAGE_RESPONSE", protocol.STATUS_ERROR, message="permissao negada"
+        )
+
+    ctx.db.set_message_pinned(msg_uuid, pinned)
+
+    member_ids = {row["id"] for row in ctx.db.get_forum_members(forum_id)}
+    event = protocol.make_event(
+        protocol.EVT_MESSAGE_PINNED,
+        data={"forum_id": forum_id, "uuid": msg_uuid, "pinned": pinned},
+    )
+    ctx.sessions.broadcast_to_users(member_ids, event, exclude=ctx.sock)
+
+    return protocol.make_response("PIN_MESSAGE_RESPONSE", protocol.STATUS_OK, message="atualizado")
+
+
+def handle_delete_message(data: dict, ctx: HandlerContext) -> dict:
+    """Apaga uma mensagem de forum. Permitido para o autor ou quem tem DELETE_MESSAGE.
+
+    Espera data = {"uuid": str}.
+    """
+    session = ctx.sessions.get(ctx.sock)
+    if session is None or session.get("user_id") is None:
+        return protocol.make_response(
+            "DELETE_MESSAGE_RESPONSE", protocol.STATUS_ERROR, message="nao autenticado"
+        )
+
+    msg_uuid = data.get("uuid")
+    message_row = ctx.db.get_message_by_uuid(msg_uuid) if msg_uuid else None
+    if message_row is None:
+        return protocol.make_response(
+            "DELETE_MESSAGE_RESPONSE", protocol.STATUS_ERROR, message="mensagem nao encontrada"
+        )
+
+    forum_id = message_row["forum_id"]
+    is_author = message_row["sender_id"] == session["user_id"]
+    mask = ctx.db.get_member_permission_mask(forum_id, session["user_id"])
+    if not is_author and not permissions.has_permission(mask, permissions.Permission.DELETE_MESSAGE):
+        return protocol.make_response(
+            "DELETE_MESSAGE_RESPONSE", protocol.STATUS_ERROR, message="permissao negada"
+        )
+
+    ctx.db.delete_message(msg_uuid)
+
+    member_ids = {row["id"] for row in ctx.db.get_forum_members(forum_id)}
+    event = protocol.make_event(
+        protocol.EVT_MESSAGE_DELETED, data={"forum_id": forum_id, "uuid": msg_uuid}
+    )
+    ctx.sessions.broadcast_to_users(member_ids, event, exclude=ctx.sock)
+
+    return protocol.make_response("DELETE_MESSAGE_RESPONSE", protocol.STATUS_OK, message="mensagem apagada")

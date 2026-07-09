@@ -20,6 +20,10 @@ Comandos interativos:
     /list                     -> lista os foruns do usuario logado
     /send <forum_id> <msg>    -> envia mensagem cifrada com a AES do forum
     /history <forum_id>       -> busca e decifra o historico do forum
+    /createrole <forum_id> <nome> <mascara> -> cria role (requer MANAGE_ROLES)
+    /assignrole <forum_id> <user> <role_id> -> atribui role (requer MANAGE_ROLES)
+    /pin <uuid>               -> fixa a mensagem (requer PIN_MESSAGE)
+    /delete <uuid>            -> apaga a mensagem (autor ou DELETE_MESSAGE)
     /raw <CMD> <json_data>    -> envia um request cru: cmd + data (JSON)
     /quit                     -> encerra
 
@@ -332,9 +336,30 @@ def _cmd_history(client: CorvoClient, forum_id: int) -> None:
             plaintext = crypto_utils.aes_decrypt(
                 base64.b64decode(msg["ciphertext"]), aes_key, base64.b64decode(msg["iv"])
             )
-            print(f"[{msg['timestamp']}] {msg['sender']}: {plaintext.decode('utf-8')}")
+            pin = " [FIXADA]" if msg["pinned"] else ""
+            print(f"[{msg['timestamp']}] ({msg['uuid']}) {msg['sender']}: {plaintext.decode('utf-8')}{pin}")
         except Exception as exc:
-            print(f"[{msg['timestamp']}] {msg['sender']}: <falha ao decifrar: {exc}>")
+            print(f"[{msg['timestamp']}] ({msg['uuid']}) {msg['sender']}: <falha ao decifrar: {exc}>")
+
+
+def _cmd_create_role(client: CorvoClient, forum_id: int, name: str, mask: int) -> None:
+    client.request(
+        protocol.CMD_CREATE_ROLE, {"forum_id": forum_id, "name": name, "permissions": mask}
+    )
+
+
+def _cmd_assign_role(client: CorvoClient, forum_id: int, username: str, role_id: int) -> None:
+    client.request(
+        protocol.CMD_ASSIGN_ROLE, {"forum_id": forum_id, "username": username, "role_id": role_id}
+    )
+
+
+def _cmd_pin_message(client: CorvoClient, msg_uuid: str) -> None:
+    client.request(protocol.CMD_PIN_MESSAGE, {"uuid": msg_uuid, "pinned": True})
+
+
+def _cmd_delete_message(client: CorvoClient, msg_uuid: str) -> None:
+    client.request(protocol.CMD_DELETE_MESSAGE, {"uuid": msg_uuid})
 
 
 def main() -> None:
@@ -346,7 +371,8 @@ def main() -> None:
         return
     print(
         "[Corvo Negro] conectado. Comandos: /register /login /dm "
-        "/create /join /leave /list /send /history /ping /echo /raw /quit"
+        "/create /join /leave /list /send /history /createrole /assignrole "
+        "/pin /delete /ping /echo /raw /quit"
     )
 
     stop = threading.Event()
@@ -386,6 +412,16 @@ def main() -> None:
                 _cmd_send_to_forum(client, int(forum_id), texto)
             elif line.startswith("/history "):
                 _cmd_history(client, int(line[len("/history "):].strip()))
+            elif line.startswith("/createrole "):
+                _, forum_id, name, mask = line.split(" ", 3)
+                _cmd_create_role(client, int(forum_id), name, int(mask))
+            elif line.startswith("/assignrole "):
+                _, forum_id, user, role_id = line.split(" ", 3)
+                _cmd_assign_role(client, int(forum_id), user, int(role_id))
+            elif line.startswith("/pin "):
+                _cmd_pin_message(client, line[len("/pin "):].strip())
+            elif line.startswith("/delete "):
+                _cmd_delete_message(client, line[len("/delete "):].strip())
             elif line.startswith("/raw "):
                 _, cmd, *rest = line.split(" ", 2)
                 data = json.loads(rest[0]) if rest else {}
@@ -393,7 +429,7 @@ def main() -> None:
             else:
                 print(
                     "comandos: /register /login /dm /create /join /leave /list "
-                    "/send /history /ping /echo /raw /quit"
+                    "/send /history /createrole /assignrole /pin /delete /ping /echo /raw /quit"
                 )
             time.sleep(0.05)
     except (EOFError, KeyboardInterrupt):

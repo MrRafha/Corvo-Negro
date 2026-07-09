@@ -251,3 +251,368 @@ def test_list_my_forums_sem_autenticacao(servidor):
     assert r["status"] == protocol.STATUS_ERROR
     assert "nao autenticado" in r["message"]
     c.close()
+
+
+# --- get_forum_members ------------------------------------------------------------
+
+def test_get_forum_members_sucesso(servidor):
+    dono = _cliente(servidor)
+    _registrar_e_logar(dono, "alice", "s3nh4A!")
+    dono.request(protocol.CMD_CREATE_FORUM, {"name": "Corvos da Noite"})
+    r = _resp(dono)
+    forum_id, invite_code = r["data"]["forum_id"], r["data"]["invite_code"]
+
+    membro = _cliente(servidor)
+    _registrar_e_logar(membro, "bob", "s3nh4B!")
+    membro.request(protocol.CMD_JOIN_FORUM, {"invite_code": invite_code})
+    _resp(membro)
+    _resp(dono)  # descarta MEMBER_JOINED
+
+    dono.request(protocol.CMD_GET_FORUM_MEMBERS, {"forum_id": forum_id})
+    r = _resp(dono)
+    assert r["status"] == protocol.STATUS_OK
+    membros = {m["username"]: m for m in r["data"]["members"]}
+    assert set(membros) == {"alice", "bob"}
+    assert any(role["name"] == "Corvo-Mor" for role in membros["alice"]["roles"])
+    assert any(role["name"] == "Iniciado" for role in membros["bob"]["roles"])
+
+    dono.close()
+    membro.close()
+
+
+def test_get_forum_members_nao_membro(servidor):
+    dono = _cliente(servidor)
+    _registrar_e_logar(dono, "alice", "s3nh4A!")
+    dono.request(protocol.CMD_CREATE_FORUM, {"name": "Corvos da Noite"})
+    r = _resp(dono)
+    forum_id = r["data"]["forum_id"]
+
+    fora = _cliente(servidor)
+    _registrar_e_logar(fora, "fantasma", "s3nh4F!")
+    fora.request(protocol.CMD_GET_FORUM_MEMBERS, {"forum_id": forum_id})
+    r = _resp(fora)
+    assert r["status"] == protocol.STATUS_ERROR
+    assert "nao e membro" in r["message"]
+
+    dono.close()
+    fora.close()
+
+
+def test_get_forum_members_sem_autenticacao(servidor):
+    c = _cliente(servidor)
+    c.request(protocol.CMD_GET_FORUM_MEMBERS, {"forum_id": 1})
+    r = _resp(c)
+    assert r["status"] == protocol.STATUS_ERROR
+    assert "nao autenticado" in r["message"]
+    c.close()
+
+
+# --- regenerate_invite ------------------------------------------------------------
+
+def test_regenerate_invite_dono_sucesso_e_invalida_antigo(servidor):
+    dono = _cliente(servidor)
+    _registrar_e_logar(dono, "alice", "s3nh4A!")
+    dono.request(protocol.CMD_CREATE_FORUM, {"name": "Corvos da Noite"})
+    r = _resp(dono)
+    forum_id, invite_antigo = r["data"]["forum_id"], r["data"]["invite_code"]
+
+    dono.request(protocol.CMD_REGENERATE_INVITE, {"forum_id": forum_id})
+    r = _resp(dono)
+    assert r["status"] == protocol.STATUS_OK
+    invite_novo = r["data"]["invite_code"]
+    assert invite_novo != invite_antigo
+
+    outro = _cliente(servidor)
+    _registrar_e_logar(outro, "bob", "s3nh4B!")
+    outro.request(protocol.CMD_JOIN_FORUM, {"invite_code": invite_antigo})
+    r = _resp(outro)
+    assert r["status"] == protocol.STATUS_ERROR
+
+    outro.request(protocol.CMD_JOIN_FORUM, {"invite_code": invite_novo})
+    r = _resp(outro)
+    assert r["status"] == protocol.STATUS_OK
+
+    dono.close()
+    outro.close()
+
+
+def test_regenerate_invite_notifica_quem_tem_permissao(servidor):
+    dono = _cliente(servidor)
+    _registrar_e_logar(dono, "alice", "s3nh4A!")
+    dono.request(protocol.CMD_CREATE_FORUM, {"name": "Corvos da Noite"})
+    r = _resp(dono)
+    forum_id, invite_code = r["data"]["forum_id"], r["data"]["invite_code"]
+
+    # bob e Iniciado (sem CREATE_INVITE) -> nao deve ser notificado
+    bob = _cliente(servidor)
+    _registrar_e_logar(bob, "bob", "s3nh4B!")
+    bob.request(protocol.CMD_JOIN_FORUM, {"invite_code": invite_code})
+    _resp(bob)
+    _resp(dono)  # descarta MEMBER_JOINED
+
+    dono.request(protocol.CMD_REGENERATE_INVITE, {"forum_id": forum_id})
+    r = _resp(dono)
+    assert r["status"] == protocol.STATUS_OK
+
+    bob.request("PING", {})  # ping-pong: se o INVITE_REGENERATED tivesse chegado, viria antes do PONG
+    r2 = _resp(bob)
+    assert r2["cmd"] == "PONG"
+
+    dono.close()
+    bob.close()
+
+
+def test_regenerate_invite_sem_permissao(servidor):
+    dono = _cliente(servidor)
+    _registrar_e_logar(dono, "alice", "s3nh4A!")
+    dono.request(protocol.CMD_CREATE_FORUM, {"name": "Corvos da Noite"})
+    r = _resp(dono)
+    forum_id, invite_code = r["data"]["forum_id"], r["data"]["invite_code"]
+
+    bob = _cliente(servidor)
+    _registrar_e_logar(bob, "bob", "s3nh4B!")
+    bob.request(protocol.CMD_JOIN_FORUM, {"invite_code": invite_code})
+    _resp(bob)
+    _resp(dono)
+
+    bob.request(protocol.CMD_REGENERATE_INVITE, {"forum_id": forum_id})
+    r = _resp(bob)
+    assert r["status"] == protocol.STATUS_ERROR
+    assert "permissao negada" in r["message"]
+
+    dono.close()
+    bob.close()
+
+
+# --- update_forum ------------------------------------------------------------------
+
+def test_update_forum_dono_sucesso(servidor):
+    dono = _cliente(servidor)
+    _registrar_e_logar(dono, "alice", "s3nh4A!")
+    dono.request(protocol.CMD_CREATE_FORUM, {"name": "Corvos da Noite"})
+    r = _resp(dono)
+    forum_id = r["data"]["forum_id"]
+
+    dono.request(protocol.CMD_UPDATE_FORUM, {"forum_id": forum_id, "name": "Nova Cripta", "icon": "☿"})
+    r = _resp(dono)
+    assert r["status"] == protocol.STATUS_OK
+    assert r["data"]["name"] == "Nova Cripta"
+    assert r["data"]["icon"] == "☿"
+    dono.close()
+
+
+def test_update_forum_nao_dono_falha(servidor):
+    dono = _cliente(servidor)
+    _registrar_e_logar(dono, "alice", "s3nh4A!")
+    dono.request(protocol.CMD_CREATE_FORUM, {"name": "Corvos da Noite"})
+    r = _resp(dono)
+    forum_id, invite_code = r["data"]["forum_id"], r["data"]["invite_code"]
+
+    bob = _cliente(servidor)
+    _registrar_e_logar(bob, "bob", "s3nh4B!")
+    bob.request(protocol.CMD_JOIN_FORUM, {"invite_code": invite_code})
+    _resp(bob)
+    _resp(dono)
+
+    bob.request(protocol.CMD_UPDATE_FORUM, {"forum_id": forum_id, "name": "Hackeado"})
+    r = _resp(bob)
+    assert r["status"] == protocol.STATUS_ERROR
+    assert "dono" in r["message"]
+
+    dono.close()
+    bob.close()
+
+
+# --- delete_forum ------------------------------------------------------------------
+
+def test_delete_forum_dono_sucesso(servidor):
+    dono = _cliente(servidor)
+    _registrar_e_logar(dono, "alice", "s3nh4A!")
+    dono.request(protocol.CMD_CREATE_FORUM, {"name": "Corvos da Noite"})
+    r = _resp(dono)
+    forum_id, invite_code = r["data"]["forum_id"], r["data"]["invite_code"]
+
+    bob = _cliente(servidor)
+    _registrar_e_logar(bob, "bob", "s3nh4B!")
+    bob.request(protocol.CMD_JOIN_FORUM, {"invite_code": invite_code})
+    _resp(bob)
+    _resp(dono)
+
+    dono.request(protocol.CMD_DELETE_FORUM, {"forum_id": forum_id})
+    r = _resp(dono)
+    assert r["status"] == protocol.STATUS_OK
+
+    evt = _resp(bob)
+    assert evt["cmd"] == protocol.EVT_FORUM_DELETED
+    assert evt["data"]["forum_id"] == forum_id
+
+    dono.request(protocol.CMD_LIST_MY_FORUMS, {})
+    r = _resp(dono)
+    assert r["data"]["forums"] == []
+
+    dono.close()
+    bob.close()
+
+
+def test_delete_forum_nao_dono_falha(servidor):
+    dono = _cliente(servidor)
+    _registrar_e_logar(dono, "alice", "s3nh4A!")
+    dono.request(protocol.CMD_CREATE_FORUM, {"name": "Corvos da Noite"})
+    r = _resp(dono)
+    forum_id, invite_code = r["data"]["forum_id"], r["data"]["invite_code"]
+
+    bob = _cliente(servidor)
+    _registrar_e_logar(bob, "bob", "s3nh4B!")
+    bob.request(protocol.CMD_JOIN_FORUM, {"invite_code": invite_code})
+    _resp(bob)
+    _resp(dono)
+
+    bob.request(protocol.CMD_DELETE_FORUM, {"forum_id": forum_id})
+    r = _resp(bob)
+    assert r["status"] == protocol.STATUS_ERROR
+    assert "dono" in r["message"]
+
+    dono.close()
+    bob.close()
+
+
+# --- kick_member -------------------------------------------------------------------
+
+def test_kick_member_sucesso(servidor):
+    dono = _cliente(servidor)
+    _registrar_e_logar(dono, "alice", "s3nh4A!")
+    dono.request(protocol.CMD_CREATE_FORUM, {"name": "Corvos da Noite"})
+    r = _resp(dono)
+    forum_id, invite_code = r["data"]["forum_id"], r["data"]["invite_code"]
+
+    bob = _cliente(servidor)
+    _registrar_e_logar(bob, "bob", "s3nh4B!")
+    bob.request(protocol.CMD_JOIN_FORUM, {"invite_code": invite_code})
+    _resp(bob)
+    _resp(dono)
+
+    dono.request(protocol.CMD_KICK_MEMBER, {"forum_id": forum_id, "username": "bob"})
+    r = _resp(dono)
+    assert r["status"] == protocol.STATUS_OK
+
+    evt = _resp(bob)
+    assert evt["cmd"] == protocol.EVT_MEMBER_KICKED
+
+    # bob consegue reentrar com convite valido (kick nao bane)
+    bob.request(protocol.CMD_JOIN_FORUM, {"invite_code": invite_code})
+    r = _resp(bob)
+    assert r["status"] == protocol.STATUS_OK
+
+    dono.close()
+    bob.close()
+
+
+def test_kick_member_sem_permissao(servidor):
+    dono = _cliente(servidor)
+    _registrar_e_logar(dono, "alice", "s3nh4A!")
+    dono.request(protocol.CMD_CREATE_FORUM, {"name": "Corvos da Noite"})
+    r = _resp(dono)
+    forum_id, invite_code = r["data"]["forum_id"], r["data"]["invite_code"]
+
+    bob = _cliente(servidor)
+    _registrar_e_logar(bob, "bob", "s3nh4B!")
+    bob.request(protocol.CMD_JOIN_FORUM, {"invite_code": invite_code})
+    _resp(bob)
+    _resp(dono)
+
+    carol = _cliente(servidor)
+    _registrar_e_logar(carol, "carol", "s3nh4C!")
+    carol.request(protocol.CMD_JOIN_FORUM, {"invite_code": invite_code})
+    _resp(carol)
+    _resp(dono)
+    _resp(bob)
+
+    bob.request(protocol.CMD_KICK_MEMBER, {"forum_id": forum_id, "username": "carol"})
+    r = _resp(bob)
+    assert r["status"] == protocol.STATUS_ERROR
+    assert "permissao negada" in r["message"]
+
+    dono.close()
+    bob.close()
+    carol.close()
+
+
+def test_kick_dono_falha(servidor):
+    dono = _cliente(servidor)
+    _registrar_e_logar(dono, "alice", "s3nh4A!")
+    dono.request(protocol.CMD_CREATE_FORUM, {"name": "Corvos da Noite"})
+    r = _resp(dono)
+    forum_id = r["data"]["forum_id"]
+
+    dono.request(protocol.CMD_KICK_MEMBER, {"forum_id": forum_id, "username": "alice"})
+    r = _resp(dono)
+    assert r["status"] == protocol.STATUS_ERROR
+    assert "dono" in r["message"]
+    dono.close()
+
+
+# --- ban_member --------------------------------------------------------------------
+
+def test_ban_member_sucesso_impede_reentrada(servidor):
+    dono = _cliente(servidor)
+    _registrar_e_logar(dono, "alice", "s3nh4A!")
+    dono.request(protocol.CMD_CREATE_FORUM, {"name": "Corvos da Noite"})
+    r = _resp(dono)
+    forum_id, invite_code = r["data"]["forum_id"], r["data"]["invite_code"]
+
+    bob = _cliente(servidor)
+    _registrar_e_logar(bob, "bob", "s3nh4B!")
+    bob.request(protocol.CMD_JOIN_FORUM, {"invite_code": invite_code})
+    _resp(bob)
+    _resp(dono)
+
+    dono.request(protocol.CMD_BAN_MEMBER, {"forum_id": forum_id, "username": "bob"})
+    r = _resp(dono)
+    assert r["status"] == protocol.STATUS_OK
+
+    evt = _resp(bob)
+    assert evt["cmd"] == protocol.EVT_MEMBER_BANNED
+
+    bob.request(protocol.CMD_JOIN_FORUM, {"invite_code": invite_code})
+    r = _resp(bob)
+    assert r["status"] == protocol.STATUS_ERROR
+    assert "banido" in r["message"]
+
+    dono.close()
+    bob.close()
+
+
+def test_ban_member_sem_permissao(servidor):
+    dono = _cliente(servidor)
+    _registrar_e_logar(dono, "alice", "s3nh4A!")
+    dono.request(protocol.CMD_CREATE_FORUM, {"name": "Corvos da Noite"})
+    r = _resp(dono)
+    forum_id, invite_code = r["data"]["forum_id"], r["data"]["invite_code"]
+
+    bob = _cliente(servidor)
+    _registrar_e_logar(bob, "bob", "s3nh4B!")
+    bob.request(protocol.CMD_JOIN_FORUM, {"invite_code": invite_code})
+    _resp(bob)
+    _resp(dono)
+
+    bob.request(protocol.CMD_BAN_MEMBER, {"forum_id": forum_id, "username": "alice"})
+    r = _resp(bob)
+    assert r["status"] == protocol.STATUS_ERROR
+    assert "permissao negada" in r["message"]
+
+    dono.close()
+    bob.close()
+
+
+def test_ban_dono_falha(servidor):
+    dono = _cliente(servidor)
+    _registrar_e_logar(dono, "alice", "s3nh4A!")
+    dono.request(protocol.CMD_CREATE_FORUM, {"name": "Corvos da Noite"})
+    r = _resp(dono)
+    forum_id = r["data"]["forum_id"]
+
+    dono.request(protocol.CMD_BAN_MEMBER, {"forum_id": forum_id, "username": "alice"})
+    r = _resp(dono)
+    assert r["status"] == protocol.STATUS_ERROR
+    assert "dono" in r["message"]
+    dono.close()
