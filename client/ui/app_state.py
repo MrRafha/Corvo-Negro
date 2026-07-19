@@ -20,6 +20,13 @@ class AppState:
     # {forum_id} — foruns onde este usuario e o dono.
     owned_forums: set[int] = field(default_factory=set)
     current_forum_id: int | None = None
+    # Modo LAN (Sprint 3): True quando o servidor central esta inacessivel e o
+    # cliente esta operando via mesh P2P direto com outros peers na rede local.
+    modo_lan: bool = False
+    # username -> lan_discovery.PeerInfo dos peers mesh atualmente conectados.
+    peers_lan: dict[str, object] = field(default_factory=dict)
+    # client.storage.local_db.LocalDB aberto apos o login (Fase 3) — None ate la.
+    local_db: object | None = None
 
     def note_ownership(self, forum_id: int, owner_id: int | None) -> None:
         """Marca `forum_id` como possuido por este usuario, se `owner_id` bater."""

@@ -86,6 +86,32 @@ def test_rsa_keypair_em_pem():
     assert pub.startswith(b"-----BEGIN ") and b"PUBLIC KEY" in pub
 
 
+# --- RSA sign/verify (handshake do mesh P2P, Sprint 3) ------------------------
+
+def test_rsa_sign_verify_round_trip():
+    priv, pub = cu.generate_rsa_keypair()
+    assinatura = cu.rsa_sign(b"1:corvo:nonce123", priv)
+    assert cu.rsa_verify(b"1:corvo:nonce123", assinatura, pub) is True
+
+
+def test_rsa_verify_rejeita_dado_alterado():
+    priv, pub = cu.generate_rsa_keypair()
+    assinatura = cu.rsa_sign(b"dado original", priv)
+    assert cu.rsa_verify(b"dado alterado", assinatura, pub) is False
+
+
+def test_rsa_verify_rejeita_chave_publica_errada():
+    priv_a, _ = cu.generate_rsa_keypair()
+    _, pub_b = cu.generate_rsa_keypair()
+    assinatura = cu.rsa_sign(b"dado", priv_a)
+    assert cu.rsa_verify(b"dado", assinatura, pub_b) is False
+
+
+def test_rsa_verify_nao_levanta_com_assinatura_corrompida():
+    _, pub = cu.generate_rsa_keypair()
+    assert cu.rsa_verify(b"dado", b"nao-e-uma-assinatura-valida", pub) is False
+
+
 # --- AES round-trip ----------------------------------------------------------
 
 def test_aes_round_trip():

@@ -193,6 +193,113 @@ def handle_get_history(data: dict, ctx: HandlerContext) -> dict:
     )
 
 
+def _linha_para_dict_sync(row) -> dict:
+    """Como o formato de handle_get_history, mas inclui `id` (o incremental
+    do servidor) — o cliente precisa dele para saber ate onde ja sincronizou
+    (set_last_seen_msg_id), coisa que o GET_HISTORY normal nao precisa."""
+    return {
+        "id": row["id"],
+        "uuid": row["uuid"],
+        "sender": row["sender_username"],
+        "ciphertext": base64.b64encode(bytes(row["ciphertext"])).decode("ascii"),
+        "iv": base64.b64encode(bytes(row["iv"])).decode("ascii"),
+        "key_version": row["key_version"],
+        "pinned": bool(row["pinned"]),
+        "timestamp": row["timestamp"],
+    }
+
+
+def handle_sync_messages(data: dict, ctx: HandlerContext) -> dict:
+    """Sync bidirecional de historico apos reconexao (Sprint 3, modo LAN).
+
+    Espera data = {
+        "last_seen": {forum_id_str: last_seen_msg_id},  # o que o cliente ja tem
+        "pending": [{"forum_id", "uuid", "ciphertext"(b64), "iv"(b64),
+                     "key_version", "origin_timestamp"}, ...],  # msgs geradas offline (LAN)
+    }
+    Retorna data = {"new_messages": {forum_id_str: [msg...]}, "accepted_uuids": [...]}.
+
+    `pending` sao mensagens que o cliente gerou enquanto estava em modo LAN
+    (sem servidor); `save_message` usa INSERT OR IGNORE (uuid e UNIQUE), entao
+    reenviar a mesma sync duas vezes nao duplica nada no banco.
+    """
+    session = ctx.sessions.get(ctx.sock)
+    if session is None or session.get("user_id") is None:
+        return protocol.make_response(
+            "SYNC_MESSAGES_RESPONSE", protocol.STATUS_ERROR, message="nao autenticado"
+        )
+
+    user_id = session["user_id"]
+    last_seen = data.get("last_seen") or {}
+    pending = data.get("pending") or []
+
+    accepted_uuids: list[str] = []
+    novas_por_forum: dict[int, set[str]] = {}
+    for item in pending:
+        forum_id = item.get("forum_id")
+        uuid = item.get("uuid")
+        ciphertext_b64 = item.get("ciphertext")
+        iv_b64 = item.get("iv")
+        key_version = item.get("key_version")
+        origin_timestamp = item.get("origin_timestamp")
+        if forum_id is None or not uuid or not ciphertext_b64 or not iv_b64 or not key_version:
+            continue
+        if not ctx.db.is_member(forum_id, user_id):
+            continue
+        try:
+            ciphertext = base64.b64decode(ciphertext_b64)
+            iv = base64.b64decode(iv_b64)
+        except (ValueError, TypeError):
+            continue
+        lastrowid = ctx.db.save_message(
+            uuid=uuid, forum_id=forum_id, sender_id=user_id, ciphertext=ciphertext,
+            iv=iv, key_version=key_version, origin_timestamp=origin_timestamp,
+        )
+        if lastrowid is None:
+            continue  # uuid ja existia, duplicata ignorada
+        accepted_uuids.append(uuid)
+        novas_por_forum.setdefault(forum_id, set()).add(uuid)
+
+    # broadcast das mensagens novas (vindas da LAN) aos membros online, para
+    # quem ficou o tempo todo conectado ao servidor tambem receber em tempo real.
+    for forum_id, uuids in novas_por_forum.items():
+        for uuid in uuids:
+            row = ctx.db.get_message_by_uuid(uuid)
+            if row is None:
+                continue
+            member_ids = {r["id"] for r in ctx.db.get_forum_members(forum_id)}
+            event = protocol.make_event(
+                protocol.EVT_NEW_MESSAGE,
+                data={
+                    "uuid": row["uuid"],
+                    "forum_id": forum_id,
+                    "sender": session["username"],
+                    "ciphertext": base64.b64encode(bytes(row["ciphertext"])).decode("ascii"),
+                    "iv": base64.b64encode(bytes(row["iv"])).decode("ascii"),
+                    "key_version": row["key_version"],
+                },
+            )
+            ctx.sessions.broadcast_to_users(member_ids, event, exclude=ctx.sock)
+
+    new_messages: dict[str, list[dict]] = {}
+    for forum_id_str, since_id in last_seen.items():
+        try:
+            forum_id = int(forum_id_str)
+            since_id = int(since_id)
+        except (TypeError, ValueError):
+            continue
+        if not ctx.db.is_member(forum_id, user_id):
+            continue
+        rows = ctx.db.get_messages_since(forum_id, since_id)
+        if rows:
+            new_messages[forum_id_str] = [_linha_para_dict_sync(row) for row in rows]
+
+    return protocol.make_response(
+        "SYNC_MESSAGES_RESPONSE", protocol.STATUS_OK,
+        data={"new_messages": new_messages, "accepted_uuids": accepted_uuids},
+    )
+
+
 def handle_pin_message(data: dict, ctx: HandlerContext) -> dict:
     """Fixa ou desafixa uma mensagem de forum. Requer PIN_MESSAGE.
 

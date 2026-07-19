@@ -5,7 +5,8 @@ Widgets reutilizaveis, integrados pelas telas correspondentes:
     - BannerSync: banner ambar "Sincronizando..." com barra de progresso, que
       vira o banner verde "✓ Sincronizado" e some apos 3s;
     - ToastReconexao: toast canto inferior-direito (place) sobre a MainWindow;
-    - EmptyForuns: "Nenhum fórum reclama tua presença..." (primeiro login);
+    - EmptyForuns: "Nenhum fórum reclama tua presença..." (primeiro login).
+      Usa client/assets/images/corvo_vazio.png se existir, senao cai no glifo;
     - LanSemPeers: radar pulsante "buscando outros corvos... PORTA 9999";
     - AguardandoAprovacao: anel + "Aguardando o Corvo-Mor romper o selo...".
 
@@ -15,10 +16,16 @@ autoriza, simplificamos (glifo pulsante no lugar do spin, sem overlay CRT).
 
 from __future__ import annotations
 
+import random
+from pathlib import Path
+
 import customtkinter as ctk
 
 from client.ui import theme
 from client.ui.ui_helpers import CursorBloco, pulsar, pulsar_fg
+
+IMAGES_DIR = theme.ASSETS_DIR / "images"
+CORVO_VAZIO_PNG = IMAGES_DIR / "corvo_vazio.png"
 
 
 # --- skeleton do chat ---------------------------------------------------------------
@@ -182,24 +189,195 @@ class ToastReconexao(ctk.CTkFrame):
         return toast
 
 
+# --- host abatido (falha final de reconexao) -----------------------------------------
+
+class TelaHostAbatido(ctk.CTkToplevel):
+    """Splash full-screen de falha final apos esgotar as tentativas de reconexao.
+
+    Caveira + "O host foi abatido, não podemos manter os corvos seguros" +
+    contagem regressiva de 5s antes de encerrar a aplicacao inteira.
+    """
+
+    _SEGUNDOS_INICIAIS = 5
+    _INTERVALO_GLITCH_MS = 90
+    _N_FAIXAS_RUIDO = 22
+    _N_GLITCH_SLICES = 5
+    _TEXTO_CAVEIRA = "☠"
+    _TEXTO_TITULO = "O host foi abatido.\nNão podemos manter os corvos seguros."
+
+    def __init__(self, master: ctk.CTk, on_encerrar) -> None:
+        super().__init__(master)
+        self._on_encerrar = on_encerrar
+        self._restante = self._SEGUNDOS_INICIAIS
+
+        self.overrideredirect(True)
+        self.configure(fg_color=theme.Cores.BG_PROFUNDO)
+
+        # Tudo (fundo, caveira, titulo, contagem) e desenhado NO MESMO canvas
+        # de proposito: so assim as fatias de "glitch" desenhadas por cima
+        # (tag_raise) cortam visualmente o texto tambem, e nao so o fundo —
+        # widgets CTkLabel ficam sempre acima de qualquer Canvas irmao no Tk,
+        # entao nao daria pra sobrepor um glitch neles sem essa unificacao.
+        self._canvas = ctk.CTkCanvas(self, highlightthickness=0, bd=0, bg=theme.Cores.BG_PROFUNDO)
+        self._canvas.pack(fill="both", expand=True)
+        self._textos_montados = False
+        self._canvas.bind("<Configure>", self._on_canvas_configure)
+
+        from client.ui.ui_helpers import maximizar_sem_moldura
+        maximizar_sem_moldura(self)
+        self.lift()
+        self.focus_force()
+        self.after(1000, self._tick)
+        self.after(80, self._glitch_tick)
+
+    def _on_canvas_configure(self, _event=None) -> None:
+        """A largura/altura real do canvas so existe apos o gerenciador de
+        geometria aplicar o resize (disparado por maximizar_sem_moldura) — o
+        <Configure> e o unico jeito confiavel de saber que ja podemos medir,
+        em vez de adivinhar com after(10, ...) e arriscar w/h ainda em 1px."""
+        w = self._canvas.winfo_width()
+        h = self._canvas.winfo_height()
+        if w <= 1 or h <= 1:
+            return
+        cx, cy = w / 2, h / 2
+        self._centro_base = (cx, cy)
+        if not self._textos_montados:
+            self._montar_textos(cx, cy)
+            self._textos_montados = True
+
+    def _montar_textos(self, cx: float, cy: float) -> None:
+        c = self._canvas
+        self._id_caveira = c.create_text(
+            cx, cy - 90, text=self._TEXTO_CAVEIRA, font=theme.glifo(56),
+            fill=theme.Cores.ERRO, tags="texto",
+        )
+        self._id_titulo = c.create_text(
+            cx, cy - 10, text=self._TEXTO_TITULO, font=(theme.FAMILIA_SERIFADA, 22, "italic"),
+            fill=theme.Cores.TEXTO, justify="center", tags="texto",
+        )
+        self._id_contagem = c.create_text(
+            cx, cy + 55, text=self._texto_contagem(), font=theme.FONTES["corpo"],
+            fill=theme.Cores.MUTED, tags="texto",
+        )
+
+    def _texto_contagem(self) -> str:
+        return f"Fechando a aplicação em: {self._restante} segundos"
+
+    def _tick(self) -> None:
+        if not self.winfo_exists():
+            return
+        self._restante -= 1
+        if self._restante <= 0:
+            self._on_encerrar()
+            return
+        if hasattr(self, "_id_contagem"):
+            self._canvas.itemconfigure(self._id_contagem, text=self._texto_contagem())
+        self.after(1000, self._tick)
+
+    # --- glitch de tela de TV sem sinal --------------------------------------------
+
+    def _glitch_tick(self) -> None:
+        """Redesenha estatica + scanlines + fatias deslocadas a cada ~90ms,
+        aplica jitter de posicao no texto e ocasionalmente "corta" a caveira
+        (esconde 1 frame) — imita uma TV analogica sem sinal, sem depender de
+        nenhuma imagem/gif."""
+        if not self.winfo_exists():
+            return
+        if hasattr(self, "_centro_base"):
+            self._jitter_textos()
+        self._desenhar_estatica()
+        proximo = self._INTERVALO_GLITCH_MS + random.randint(-20, 40)
+        self.after(max(40, proximo), self._glitch_tick)
+
+    def _jitter_textos(self) -> None:
+        c = self._canvas
+        cx, cy = self._centro_base
+        dx, dy = random.randint(-4, 4), random.randint(-2, 2)
+        c.coords(self._id_caveira, cx + dx, cy - 90 + dy)
+        c.coords(self._id_titulo, cx + dx, cy - 10 + dy)
+        c.coords(self._id_contagem, cx + dx, cy + 55 + dy)
+        # corte de sinal: ~1 em cada 6 frames a caveira "some" por um instante.
+        c.itemconfigure(self._id_caveira, state="hidden" if random.random() < 0.16 else "normal")
+        # trocas rapidas de cor simulando interferencia eletrica no glifo.
+        cor_caveira = random.choice([
+            theme.Cores.ERRO, theme.Cores.TEXTO,
+            theme.mix(theme.Cores.ERRO, theme.Cores.BG_PROFUNDO, 0.3),
+        ])
+        c.itemconfigure(self._id_caveira, fill=cor_caveira)
+
+    def _desenhar_estatica(self) -> None:
+        c = self._canvas
+        w = c.winfo_width()
+        h = c.winfo_height()
+        if w <= 1 or h <= 1:
+            return
+        c.delete("glitch")
+
+        # ruido: faixas horizontais finas em tons de cinza aleatorios.
+        for _ in range(self._N_FAIXAS_RUIDO):
+            y = random.randint(0, h)
+            altura = random.randint(1, 3)
+            tom = random.randint(10, 40)
+            cor = f"#{tom:02x}{tom:02x}{tom:02x}"
+            c.create_rectangle(0, y, w, y + altura, fill=cor, outline="", tags="glitch")
+
+        # fatias horizontais "deslocadas" (glitch de sincronismo): copia uma
+        # tira vermelha/dourada fina em x aleatorio, simulando tearing — cobre
+        # a largura toda, entao corta o texto tambem quando passa por cima.
+        for _ in range(self._N_GLITCH_SLICES):
+            y = random.randint(0, h)
+            altura = random.randint(2, 14)
+            deslocamento = random.randint(-40, 40)
+            cor = random.choice([theme.Cores.ERRO, theme.Cores.MUTED, theme.Cores.DOURADO])
+            cor_fraca = theme.mix(cor, theme.Cores.BG_PROFUNDO, 0.5)
+            c.create_rectangle(deslocamento, y, w + deslocamento, y + altura, fill=cor_fraca, outline="", tags="glitch")
+
+        # scanlines finas constantes por cima de tudo.
+        for y in range(0, h, 3):
+            c.create_line(0, y, w, y, fill=theme.mix(theme.Cores.MUTED, theme.Cores.BG_PROFUNDO, 0.06), tags="glitch")
+
+        # o glitch fica ACIMA do texto (tag_raise) pra cortar visualmente a
+        # caveira/titulo tambem, nao so o fundo — e o efeito que faltava.
+        c.tag_raise("glitch", "texto")
+
+
 # --- vazios / espera ----------------------------------------------------------------
 
 class EmptyForuns(ctk.CTkFrame):
-    def __init__(self, master, on_fundar=None, on_aceitar=None, **kwargs) -> None:
+    def __init__(self, master, on_fundar=None, on_aceitar=None, imagem_path: Path | None = None, **kwargs) -> None:
         kwargs.setdefault("fg_color", "transparent")
         super().__init__(master, **kwargs)
-        ctk.CTkLabel(self, text="🜲", font=theme.glifo(46), text_color=theme.mix(theme.Cores.DOURADO, theme.Cores.BG_PROFUNDO, 0.7)).pack(pady=(0, 12))
+        self._montar_glifo_ou_imagem(imagem_path or CORVO_VAZIO_PNG)
         ctk.CTkLabel(self, text="Nenhum fórum reclama tua presença.\nFunde um novo pacto ou aceita uma convocação.",
-                     font=(theme.FAMILIA_SERIFADA, 18, "italic"), text_color=theme.Cores.TEXTO, justify="center").pack(pady=(0, 16))
+                     font=(theme.FAMILIA_SERIFADA, 18, "italic"), text_color=theme.Cores.TEXTO,
+                     justify="center", wraplength=180).pack(pady=(0, 16), padx=8)
         botoes = ctk.CTkFrame(self, fg_color="transparent")
-        botoes.pack()
+        botoes.pack(fill="x", padx=8)
         ctk.CTkButton(botoes, text="＋ FUNDAR FÓRUM", font=theme.FONTES["corpo_pequeno"], corner_radius=0,
                       fg_color=theme.Cores.DOURADO, text_color=theme.Cores.BG_PROFUNDO, hover_color=theme.Cores.TEXTO,
-                      command=on_fundar or (lambda: None)).pack(side="left", padx=(0, 10))
+                      command=on_fundar or (lambda: None)).pack(fill="x", pady=(0, 8))
         ctk.CTkButton(botoes, text="❖ ACEITAR CONVOCAÇÃO", font=theme.FONTES["corpo_pequeno"], corner_radius=0,
                       fg_color="transparent", border_width=1, border_color=theme.DOURADO_45,
                       text_color=theme.Cores.DOURADO, hover_color=theme.Cores.BG_MEDIO,
-                      command=on_aceitar or (lambda: None)).pack(side="left")
+                      command=on_aceitar or (lambda: None)).pack(fill="x")
+
+    def _montar_glifo_ou_imagem(self, imagem_path: Path) -> None:
+        """Usa o PNG do corvo se existir; senao cai no glifo tipografico.
+
+        CTkImage/Pillow nao le SVG — se o asset do Claude Design vier em SVG,
+        precisa ser convertido para PNG antes de ser colocado em
+        `client/assets/images/corvo_vazio.png`.
+        """
+        if imagem_path.is_file():
+            try:
+                from PIL import Image
+                img = ctk.CTkImage(Image.open(imagem_path), size=(64, 64))
+                ctk.CTkLabel(self, image=img, text="").pack(pady=(0, 12))
+                return
+            except Exception:
+                pass
+        ctk.CTkLabel(self, text="🜲", font=theme.glifo(46),
+                     text_color=theme.mix(theme.Cores.DOURADO, theme.Cores.BG_PROFUNDO, 0.7)).pack(pady=(0, 12))
 
 
 class LanSemPeers(ctk.CTkFrame):

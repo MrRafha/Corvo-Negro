@@ -21,11 +21,13 @@ from client.ui.app_state import AppState
 from client.ui.login_window import LoginWindow
 from client.ui.main_window import MainWindow
 from client.ui.splash_window import SplashWindow
+from client.ui.ui_helpers import instalar_atalho_destravar
 
 
 def main() -> None:
     ctk.set_appearance_mode("dark")
     login = LoginWindow(on_success=_apos_login)
+    instalar_atalho_destravar(login)  # Alt+R: destrava grab/foco preso por Alt+Tab, sem fechar a app
     login.mainloop()
 
 

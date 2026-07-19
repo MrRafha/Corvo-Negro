@@ -101,15 +101,16 @@ class Database:
                 );
 
                 CREATE TABLE IF NOT EXISTS messages (
-                    id          INTEGER PRIMARY KEY AUTOINCREMENT,
-                    uuid        TEXT    UNIQUE NOT NULL,
-                    forum_id    INTEGER NOT NULL,
-                    sender_id   INTEGER NOT NULL,
-                    ciphertext  BLOB    NOT NULL,
-                    iv          BLOB    NOT NULL,
-                    key_version INTEGER NOT NULL DEFAULT 1,
-                    pinned      INTEGER NOT NULL DEFAULT 0,
-                    timestamp   TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+                    id               INTEGER PRIMARY KEY AUTOINCREMENT,
+                    uuid             TEXT    UNIQUE NOT NULL,
+                    forum_id         INTEGER NOT NULL,
+                    sender_id        INTEGER NOT NULL,
+                    ciphertext       BLOB    NOT NULL,
+                    iv               BLOB    NOT NULL,
+                    key_version      INTEGER NOT NULL DEFAULT 1,
+                    pinned           INTEGER NOT NULL DEFAULT 0,
+                    timestamp        TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+                    origin_timestamp TEXT,
                     FOREIGN KEY (forum_id)  REFERENCES forums(id),
                     FOREIGN KEY (sender_id) REFERENCES users(id)
                 );
@@ -135,6 +136,14 @@ class Database:
                 );
             """)
             self._conn.commit()
+            # Migracao idempotente: bancos criados antes desta coluna existir
+            # nao ganham `origin_timestamp` so pelo CREATE TABLE IF NOT EXISTS
+            # acima (ele nao altera tabelas ja existentes).
+            try:
+                self._conn.execute("ALTER TABLE messages ADD COLUMN origin_timestamp TEXT")
+                self._conn.commit()
+            except sqlite3.OperationalError:
+                pass  # coluna ja existe
 
     # --- users ----------------------------------------------------------------
 
@@ -363,16 +372,23 @@ class Database:
         ciphertext: bytes,
         iv: bytes,
         key_version: int,
-    ) -> int:
-        """Persiste uma mensagem de forum ja cifrada. O servidor nunca decifra."""
+        origin_timestamp: str | None = None,
+    ) -> int | None:
+        """Persiste uma mensagem de forum ja cifrada. O servidor nunca decifra.
+
+        INSERT OR IGNORE por uuid: mensagens geradas offline (modo LAN) podem
+        ser re-enviadas ao sincronizar sem duplicar linha. Retorna o lastrowid
+        da linha inserida, ou None se a uuid ja existia (duplicata ignorada).
+        """
         with self._lock:
             cursor = self._conn.execute(
-                """INSERT INTO messages (uuid, forum_id, sender_id, ciphertext, iv, key_version)
-                   VALUES (?, ?, ?, ?, ?, ?)""",
-                (uuid, forum_id, sender_id, ciphertext, iv, key_version),
+                """INSERT OR IGNORE INTO messages
+                   (uuid, forum_id, sender_id, ciphertext, iv, key_version, origin_timestamp)
+                   VALUES (?, ?, ?, ?, ?, ?, ?)""",
+                (uuid, forum_id, sender_id, ciphertext, iv, key_version, origin_timestamp),
             )
             self._conn.commit()
-            return cursor.lastrowid
+            return cursor.lastrowid if cursor.rowcount > 0 else None
 
     def get_messages_for_forum(self, forum_id: int) -> list[sqlite3.Row]:
         """Historico completo do forum, em ordem cronologica."""
@@ -382,6 +398,17 @@ class Database:
                 "JOIN users ON users.id = messages.sender_id "
                 "WHERE messages.forum_id = ? ORDER BY messages.id ASC",
                 (forum_id,),
+            ).fetchall()
+
+    def get_messages_since(self, forum_id: int, since_id: int) -> list[sqlite3.Row]:
+        """Mensagens do forum com id maior que `since_id`, ordem cronologica —
+        usado no sync incremental ao reconectar (Sprint 3)."""
+        with self._lock:
+            return self._conn.execute(
+                "SELECT messages.*, users.username AS sender_username FROM messages "
+                "JOIN users ON users.id = messages.sender_id "
+                "WHERE messages.forum_id = ? AND messages.id > ? ORDER BY messages.id ASC",
+                (forum_id, since_id),
             ).fetchall()
 
     def get_message_by_uuid(self, uuid: str) -> sqlite3.Row | None:

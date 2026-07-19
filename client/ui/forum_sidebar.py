@@ -127,11 +127,9 @@ class ForumSidebar(ctk.CTkFrame):
             self._destacar_selecionado()
 
     def _mostrar_vazio(self) -> None:
-        vazio = ctk.CTkLabel(
-            self._lista, text="Nenhum fórum reclama\ntua presença.",
-            font=(theme.FAMILIA_SERIFADA, 14, "italic"), text_color=theme.Cores.MUTED, justify="center",
-        )
-        vazio.pack(pady=20)
+        from client.ui.estados import EmptyForuns
+        self._vazio = EmptyForuns(self._lista, on_fundar=self._abrir_criar_forum, on_aceitar=self._abrir_entrar_forum)
+        self._vazio.pack(pady=20)
 
     def _criar_item_forum(self, forum_id: int, nome: str, glifo: str) -> dict:
         frame = ctk.CTkFrame(self._lista, height=1, fg_color="transparent", corner_radius=0)

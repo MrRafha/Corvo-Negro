@@ -81,10 +81,12 @@ class Router:
             handle_update_pubkey,
             handle_get_pubkey,
             handle_distribute_key,
+            handle_request_forum_key,
         )
         self.register(protocol.CMD_UPDATE_PUBKEY, handle_update_pubkey)
         self.register(protocol.CMD_GET_PUBKEY, handle_get_pubkey)
         self.register(protocol.CMD_DISTRIBUTE_KEY, handle_distribute_key)
+        self.register(protocol.CMD_REQUEST_FORUM_KEY, handle_request_forum_key)
 
     def _register_message(self) -> None:
         from server.handlers.message import (
@@ -93,12 +95,14 @@ class Router:
             handle_get_history,
             handle_pin_message,
             handle_delete_message,
+            handle_sync_messages,
         )
         self.register(protocol.CMD_MSG_1V1, handle_msg_1v1)
         self.register(protocol.CMD_SEND_TO_FORUM, handle_send_to_forum)
         self.register(protocol.CMD_GET_HISTORY, handle_get_history)
         self.register(protocol.CMD_PIN_MESSAGE, handle_pin_message)
         self.register(protocol.CMD_DELETE_MESSAGE, handle_delete_message)
+        self.register(protocol.CMD_SYNC_MESSAGES, handle_sync_messages)
 
     def _register_forum(self) -> None:
         from server.handlers.forum import (

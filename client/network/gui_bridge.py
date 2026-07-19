@@ -25,6 +25,7 @@ Uso:
 
 from __future__ import annotations
 
+import threading
 from collections import defaultdict, deque
 from typing import Callable
 
@@ -36,6 +37,7 @@ ErrorCallback = Callable[[str], None]
 EventCallback = Callable[[dict], None]
 
 POLL_INTERVAL_MS = 30
+MAX_TENTATIVAS_RECONEXAO = 3
 
 
 def _base_command_from_response(cmd: str) -> str | None:
@@ -79,6 +81,39 @@ class ClientBridge:
     def close(self) -> None:
         self.stop_polling()
         self.client.close()
+
+    # --- reconexao apos queda -----------------------------------------------------
+
+    def tentar_reconectar(
+        self,
+        on_tentativa: Callable[[int, int], None] | None = None,
+        on_sucesso: Callable[[], None] | None = None,
+        on_falha_final: Callable[[], None] | None = None,
+        max_tentativas: int = MAX_TENTATIVAS_RECONEXAO,
+    ) -> None:
+        """Tenta reabrir o socket ate `max_tentativas` vezes (1 tentativa por vez).
+
+        `connect()` bloqueia ate o timeout de conexao — roda numa thread para
+        nao travar a UI. Callbacks sao sempre chamados via `tk_root.after()`,
+        entao e seguro mexer em widgets dentro deles.
+        `on_tentativa(numero, max_tentativas)` dispara antes de cada tentativa.
+        Nao reautentica (sem CMD_LOGIN): so restabelece o TCP. A sessao antiga
+        no servidor ja caiu junto com o socket — apos reconectar, quem chama
+        decide se precisa recarregar dados de sessao.
+        """
+        def worker(tentativa: int) -> None:
+            self.tk_root.after(0, lambda: on_tentativa and on_tentativa(tentativa, max_tentativas))
+            try:
+                self.client.reconnect()
+            except OSError:
+                if tentativa >= max_tentativas:
+                    self.tk_root.after(0, lambda: on_falha_final and on_falha_final())
+                else:
+                    threading.Thread(target=worker, args=(tentativa + 1,), daemon=True).start()
+            else:
+                self.tk_root.after(0, lambda: on_sucesso and on_sucesso())
+
+        threading.Thread(target=worker, args=(1,), daemon=True).start()
 
     # --- registro de listeners de evento -----------------------------------------
 

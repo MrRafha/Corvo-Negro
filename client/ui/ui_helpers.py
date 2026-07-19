@@ -351,6 +351,13 @@ def grab_seguro(janela: ctk.CTkToplevel) -> None:
         try:
             if em_foco and estado["solto"]:
                 janela.grab_set()
+                # janelas overrideredirect nao voltam pra frente sozinhas
+                # quando o SO devolve o foco via Alt+Tab (o Windows traz o
+                # processo de volta, mas o Toplevel "transient" pode ficar
+                # visualmente atras da janela-mae, ainda que continue
+                # recebendo eventos de teclado por causa do grab).
+                janela.lift()
+                janela.focus_force()
                 estado["solto"] = False
             elif not em_foco and not estado["solto"]:
                 janela.grab_release()
@@ -361,6 +368,106 @@ def grab_seguro(janela: ctk.CTkToplevel) -> None:
 
     janela.grab_set()
     janela.after(_GRAB_POLL_MS, _checar)
+
+
+_TELA_RECARREGAMENTO_MS = 400
+
+
+class TelaRecarregamento(ctk.CTkToplevel):
+    """Overlay full-screen "Recarregando..." mostrado durante destravar_ui().
+
+    Cobre a tela inteira por cima de qualquer janela presa/invisivel, dando
+    feedback visual de que algo esta acontecendo, e se fecha sozinho quando
+    `destravar_ui` termina de recapturar grab/foco — nao antes de um tempo
+    minimo (`_TELA_RECARREGAMENTO_MS`), pra nao soh "piscar" quando a
+    destravagem e instantanea.
+    """
+
+    def __init__(self, master: ctk.CTk) -> None:
+        super().__init__(master)
+        self.overrideredirect(True)
+        self.configure(fg_color=theme.Cores.BG_PROFUNDO)
+        self.attributes("-alpha", 0.96)
+        self.after(10, lambda: maximizar_sem_moldura(self))
+
+        centro = ctk.CTkFrame(self, fg_color="transparent")
+        centro.place(relx=0.5, rely=0.5, anchor="center")
+        ctk.CTkLabel(centro, text="🜲", font=theme.glifo(34), text_color=theme.Cores.DOURADO).pack()
+        linha = ctk.CTkFrame(centro, fg_color="transparent")
+        linha.pack(pady=(14, 0))
+        lbl = ctk.CTkLabel(linha, text="Recarregando a interface...", font=theme.FONTES["corpo"], text_color=theme.Cores.MUTED)
+        lbl.pack(side="left")
+        CursorBloco(linha, periodo_ms=400, cor_fundo=theme.Cores.BG_PROFUNDO).pack(side="left", padx=(6, 0))
+        pulsar(lbl, theme.Cores.MUTED, theme.mix(theme.Cores.MUTED, theme.Cores.BG_PROFUNDO, 0.4), periodo_ms=700)
+
+        self.lift()
+        self.focus_force()
+
+    def fechar(self) -> None:
+        if _vivo(self):
+            try:
+                self.destroy()
+            except Exception:
+                pass
+
+
+def destravar_ui(raiz: ctk.CTk) -> None:
+    """Atalho de emergencia (Alt+R): solta qualquer grab_set() preso e traz
+    a janela correta de volta ao topo/foco, sem destruir nenhum widget nem
+    tocar em sessao/conexao de rede.
+
+    Cobre a classe de bug de janelas overrideredirect que ficam "presas"
+    (grab ativo mas invisivel, ou grab nunca solto) apos um Alt+Tab em
+    timing ruim — mesmo com grab_seguro() aplicado nos modais, o polling de
+    250ms pode nao pegar todo caso. Isto e a rede de seguranca manual.
+
+    Mostra uma `TelaRecarregamento` por cima de tudo enquanto o destravamento
+    acontece, pra dar feedback visual do processo mesmo quando a janela alvo
+    ainda esta invisivel no momento do Alt+R.
+
+    `raiz` e o Tk root (a LoginWindow, que fica viva e escondida durante
+    toda a sessao) — todos os Toplevel da aplicacao (Splash, MainWindow,
+    modais) aparecem em `raiz.winfo_children()`, independente de quao
+    aninhados estejam visualmente via `transient()`.
+    """
+    try:
+        toplevels = [w for w in raiz.winfo_children() if isinstance(w, (ctk.CTkToplevel,))]
+    except Exception:
+        return
+
+    overlay = TelaRecarregamento(raiz)
+
+    for tl in toplevels:
+        if tl is overlay or not _vivo(tl):
+            continue
+        try:
+            tl.grab_release()
+        except Exception:
+            pass
+
+    # a ultima janela viva na ordem de criacao (exceto o proprio overlay) e a
+    # que provavelmente deveria estar no topo (modal mais recente, ou a
+    # MainWindow se nao ha modal).
+    vivas = [tl for tl in toplevels if tl is not overlay and _vivo(tl)]
+    alvo = vivas[-1] if vivas else (raiz if _vivo(raiz) else None)
+
+    def _concluir():
+        if alvo is not None:
+            try:
+                alvo.lift()
+                alvo.focus_force()
+                if isinstance(alvo, ctk.CTkToplevel) and alvo.winfo_viewable():
+                    alvo.grab_set()
+            except Exception:
+                pass
+        overlay.fechar()
+
+    raiz.after(_TELA_RECARREGAMENTO_MS, _concluir)
+
+
+def instalar_atalho_destravar(raiz: ctk.CTk, tecla: str = "<Alt-r>") -> None:
+    """Registra o atalho global (default Alt+R) que chama `destravar_ui`."""
+    raiz.bind_all(tecla, lambda _e: destravar_ui(raiz))
 
 
 def montar_janela_sem_moldura(

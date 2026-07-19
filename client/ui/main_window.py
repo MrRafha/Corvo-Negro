@@ -16,6 +16,7 @@ import base64
 import customtkinter as ctk
 
 from shared import crypto_utils, protocol
+from client.network.connection_manager import ConnectionManager
 from client.network.gui_bridge import ClientBridge
 from client.ui import theme
 from client.ui.chat_view import ChatView
@@ -39,6 +40,14 @@ class MainWindow(ctk.CTkToplevel):
         self._bridge = bridge
         self._state = state
         self._nome_forum_atual = ""
+        self._reconectando = False
+        self._connection_manager = ConnectionManager(bridge, state, self)
+        self._connection_manager.configurar_callbacks(
+            on_peer_conectado=self._on_peers_lan_changed,
+            on_sem_peers_apos_timeout=self._on_lan_sem_peers_timeout,
+            on_mesh_message=lambda data: self._chat_view.on_mesh_message(data),
+            on_sync_concluido=self._on_sync_concluido,
+        )
 
         theme.carregar_fontes()
         self.title("Corvo Negro — Cripta do Silêncio")
@@ -59,13 +68,21 @@ class MainWindow(ctk.CTkToplevel):
         self._status_bar.grid(row=3, column=0, sticky="ew")
 
         self._bridge.on(protocol.EVT_KEY_ROTATED, self._on_key_rotated)
+        self._bridge.on(protocol.EVT_KEY_REQUESTED, self._on_key_requested)
         self._bridge.on(protocol.EVT_MEMBER_JOINED, self._on_member_joined)
         self._bridge.on(protocol.EVT_MEMBER_LEFT, self._on_member_left)
         self._bridge.on(protocol.EVT_FORUM_UPDATED, self._on_forum_updated)
         self._bridge.on(protocol.EVT_FORUM_DELETED, self._on_forum_deleted)
         self._bridge.on(protocol.EVT_MEMBER_KICKED, self._on_removido_do_forum)
         self._bridge.on(protocol.EVT_MEMBER_BANNED, self._on_removido_do_forum)
-        self._bridge.on("_DISCONNECTED", lambda _data: self.set_conexao("conectando"))
+        self._bridge.on("_DISCONNECTED", self._on_desconectado)
+
+        if state.modo_lan:
+            # login offline (LoginWindow._tentar_login_offline): nasce direto
+            # em modo LAN, sem passar pelo ciclo normal de reconexao (o bridge
+            # nem chegou a se conectar de verdade — nao ha sessao online a
+            # perder aqui).
+            self.after(50, self._on_reconexao_falhou)
 
     # --- layout -------------------------------------------------------------------
 
@@ -226,6 +243,57 @@ class MainWindow(ctk.CTkToplevel):
             self._chat_view.limpar()
             self._atualizar_visibilidade_header_forum()
 
+    def _on_desconectado(self, _data: dict) -> None:
+        if self._reconectando:
+            return  # sentinela redundante da thread de recv antiga (mesma queda)
+        self._reconectando = True
+        from client.ui.estados import ToastReconexao
+        self.set_conexao("conectando")
+        ToastReconexao.exibir(self, "Conexão perdida — tentando reconectar...", modo="aviso")
+        self._bridge.tentar_reconectar(
+            on_tentativa=self._on_tentativa_reconexao,
+            on_sucesso=self._on_reconectado,
+            on_falha_final=self._on_reconexao_falhou,
+        )
+
+    def _on_tentativa_reconexao(self, numero: int, total: int) -> None:
+        from client.ui.estados import ToastReconexao
+        ToastReconexao.exibir(self, f"Reconectando ao astropata... (tentativa {numero}/{total})", modo="aviso")
+
+    def _on_reconectado(self) -> None:
+        from client.ui.estados import ToastReconexao
+        self._reconectando = False
+        self.set_conexao("online")
+        ToastReconexao.exibir(self, "Pacto restabelecido.", modo="sucesso")
+        self._connection_manager.parar_modo_lan_e_sincronizar()
+
+    def _on_reconexao_falhou(self) -> None:
+        # nao esgota mais em TelaHostAbatido direto: tenta modo LAN primeiro.
+        # TelaHostAbatido so aparece se ninguem for encontrado na rede local
+        # dentro do timeout (ver ConnectionManager._checar_sem_peers).
+        self.set_conexao("lan", peers=0)
+        self._connection_manager.ativar_modo_lan()
+        self._chat_view.definir_mesh_manager(self._connection_manager.obter_mesh_manager())
+        self._atualizar_estado_lan_sem_peers()
+
+    def _on_peers_lan_changed(self, n: int) -> None:
+        self.set_conexao("lan", peers=n)
+        self._chat_view.atualizar_lan_sem_peers(self._state.modo_lan and n == 0)
+
+    def _atualizar_estado_lan_sem_peers(self) -> None:
+        mesh = self._connection_manager.obter_mesh_manager()
+        n = mesh.peer_count() if mesh is not None else 0
+        self._chat_view.atualizar_lan_sem_peers(self._state.modo_lan and n == 0)
+
+    def _on_lan_sem_peers_timeout(self) -> None:
+        from client.ui.estados import TelaHostAbatido
+        TelaHostAbatido(self, on_encerrar=self._fechar)
+
+    def _on_sync_concluido(self, n_mensagens: int) -> None:
+        if n_mensagens > 0:
+            self._chat_view.mostrar_banner_sync(n_mensagens)
+        self._chat_view.definir_mesh_manager(None)
+
     # --- distribuicao/rotacao de chave (identica a versao validada) ------------------
 
     def _on_key_rotated(self, data: dict) -> None:
@@ -244,6 +312,17 @@ class MainWindow(ctk.CTkToplevel):
         self._state.note_ownership(forum_id, data.get("owner_id"))
         if forum_id not in self._state.owned_forums:
             return
+        key_version = self._state.current_key_version(forum_id)
+        aes_key = self._state.forum_keys.get((forum_id, key_version))
+        if aes_key is None:
+            return
+        self._distribuir_chave_para(forum_id, data["username"], aes_key, key_version)
+
+    def _on_key_requested(self, data: dict) -> None:
+        """Um membro pediu a chave do forum porque nao a recebeu a tempo
+        (ex.: entrou enquanto eu, dono, estava offline). So o dono recebe
+        este evento (ver handle_request_forum_key no servidor)."""
+        forum_id = data["forum_id"]
         key_version = self._state.current_key_version(forum_id)
         aes_key = self._state.forum_keys.get((forum_id, key_version))
         if aes_key is None:

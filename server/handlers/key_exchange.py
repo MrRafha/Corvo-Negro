@@ -148,3 +148,70 @@ def handle_distribute_key(data: dict, ctx: HandlerContext) -> dict:
     return protocol.make_response(
         "DISTRIBUTE_KEY_RESPONSE", protocol.STATUS_OK, message="chave distribuida"
     )
+
+
+def handle_request_forum_key(data: dict, ctx: HandlerContext) -> dict:
+    """Um membro pede a AES key mais recente do forum, sem depender de o
+    dono estar online no exato momento em que entrou (Dia 8, polimento).
+
+    Espera data = {"forum_id": int}.
+
+    Se o servidor ja tem uma copia da chave da versao atual cifrada para
+    este usuario (porque o dono a distribuiu em algum momento em que o
+    usuario nao estava online), devolve na propria resposta. Caso
+    contrario, apenas avisa o dono (se online) via EVT_KEY_REQUESTED para
+    que ele distribua; o pedido nao bloqueia esperando o dono responder —
+    o cliente recebera a chave depois via EVT_KEY_ROTATED, como sempre.
+    O servidor nunca decifra a chave em nenhum dos dois caminhos.
+    """
+    session = ctx.sessions.get(ctx.sock)
+    if session is None or session.get("user_id") is None:
+        return protocol.make_response(
+            "REQUEST_FORUM_KEY_RESPONSE", protocol.STATUS_ERROR, message="nao autenticado"
+        )
+
+    forum_id = data.get("forum_id")
+    if forum_id is None:
+        return protocol.make_response(
+            "REQUEST_FORUM_KEY_RESPONSE", protocol.STATUS_ERROR, message="forum_id obrigatorio"
+        )
+
+    if not ctx.db.is_member(forum_id, session["user_id"]):
+        return protocol.make_response(
+            "REQUEST_FORUM_KEY_RESPONSE", protocol.STATUS_ERROR, message="voce nao e membro deste forum"
+        )
+
+    forum_row = ctx.db.get_forum_by_id(forum_id)
+    if forum_row is None:
+        return protocol.make_response(
+            "REQUEST_FORUM_KEY_RESPONSE", protocol.STATUS_ERROR, message="forum nao encontrado"
+        )
+
+    current_version = ctx.db.get_current_key_version(forum_id)
+    if current_version > 0:
+        key_row = ctx.db.get_forum_key(forum_id, session["user_id"], current_version)
+        if key_row is not None:
+            return protocol.make_response(
+                "REQUEST_FORUM_KEY_RESPONSE",
+                protocol.STATUS_OK,
+                data={
+                    "forum_id": forum_id,
+                    "encrypted_aes_key": base64.b64encode(bytes(key_row["encrypted_aes_key"])).decode("ascii"),
+                    "key_version": current_version,
+                },
+            )
+
+    event = protocol.make_event(
+        protocol.EVT_KEY_REQUESTED,
+        data={
+            "forum_id": forum_id,
+            "username": session["username"],
+        },
+    )
+    ctx.sessions.send_to_user(forum_row["owner_id"], event)
+
+    return protocol.make_response(
+        "REQUEST_FORUM_KEY_RESPONSE",
+        protocol.STATUS_ERROR,
+        message="chave ainda nao distribuida; dono foi notificado se estiver online",
+    )

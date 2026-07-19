@@ -12,6 +12,8 @@ API publica:
     public_key_from_private(private_key_pem) -> bytes    # re-deriva a pub key
     rsa_encrypt(data, public_key_pem) -> bytes
     rsa_decrypt(ciphertext, private_key_pem) -> bytes
+    rsa_sign(data, private_key_pem) -> bytes             # PSS+SHA-256, handshake LAN
+    rsa_verify(data, signature, public_key_pem) -> bool
     aes_encrypt(plaintext, key) -> tuple[bytes, bytes]   # (ciphertext, iv)
     aes_decrypt(ciphertext, key, iv) -> bytes
     generate_aes_key() -> bytes                          # 32 bytes = AES-256
@@ -155,6 +157,37 @@ def rsa_decrypt(ciphertext: bytes, private_key_pem: bytes) -> bytes:
     """Decifra `ciphertext` com a chave privada RSA (PEM) usando OAEP+SHA-256."""
     private_key = serialization.load_pem_private_key(private_key_pem, password=None)
     return private_key.decrypt(ciphertext, _oaep())
+
+
+def _pss() -> asym_padding.PSS:
+    """Padding PSS com MGF1/SHA-256 (usado na assinatura e verificacao)."""
+    return asym_padding.PSS(
+        mgf=asym_padding.MGF1(algorithm=hashes.SHA256()),
+        salt_length=asym_padding.PSS.MAX_LENGTH,
+    )
+
+
+def rsa_sign(data: bytes, private_key_pem: bytes) -> bytes:
+    """Assina `data` com a chave privada RSA (PSS+SHA-256).
+
+    OAEP (usado em rsa_encrypt/decrypt) e so pra cifragem, nao assina. PSS e o
+    padding de assinatura recomendado para RSA moderno. Usado no handshake do
+    modo LAN (mesh P2P) para provar posse da chave privada correspondente a
+    public key anunciada, sem depender de nenhum servidor central.
+    """
+    private_key = serialization.load_pem_private_key(private_key_pem, password=None)
+    return private_key.sign(data, _pss(), hashes.SHA256())
+
+
+def rsa_verify(data: bytes, signature: bytes, public_key_pem: bytes) -> bool:
+    """Verifica uma assinatura PSS+SHA-256. Retorna False (nunca levanta) em
+    qualquer falha — chave invalida, assinatura invalida ou dado alterado."""
+    try:
+        public_key = serialization.load_pem_public_key(public_key_pem)
+        public_key.verify(signature, data, _pss(), hashes.SHA256())
+        return True
+    except Exception:
+        return False
 
 
 # --- Criptografia de sessao (AES-256-CBC) -------------------------------------

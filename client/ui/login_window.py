@@ -419,13 +419,49 @@ class LoginWindow(ctk.CTk):
         try:
             bridge = self._obter_bridge()
         except OSError:
-            self._mostrar_erro("nao foi possivel alcancar o astropata.")
+            self._tentar_login_offline(username, senha)
             return
         bridge.call(
             protocol.CMD_LOGIN, {"username": username, "password": senha},
             on_ok=lambda data: self._on_login_ok(username, senha, data),
             on_error=lambda msg: self._mostrar_erro("O astropata não reconhece esta assinatura."),
         )
+
+    def _tentar_login_offline(self, username: str, senha: str) -> None:
+        """Sem servidor alcancavel: so e possivel entrar se este usuario JA
+        logou online alguma vez nesta maquina (o servidor e quem cria a
+        conta/user_id — nao ha como se registrar offline). Reaproveita o
+        key_vault existente como validador de senha: se load_private_key
+        decifra sem erro, a senha esta correta (mesmo mecanismo de
+        hash_password do servidor, so que local).
+        """
+        if not key_vault.has_vault(username):
+            self._mostrar_erro("nao foi possivel alcancar o astropata (e este corvo nunca logou aqui antes).")
+            return
+        try:
+            priv_pem = key_vault.load_private_key(username, senha)
+        except Exception:
+            self._mostrar_erro("O astropata não reconhece esta assinatura.")
+            return
+
+        from client.storage.local_db import LocalDB
+        vault_dir = key_vault.VAULT_DIR.parent
+        local_db = LocalDB(str(vault_dir / f"{username}_local.db"), senha)
+        user_id = local_db.get_user_id()
+        if user_id is None:
+            self._mostrar_erro("nao foi possivel alcancar o astropata (sem sessao local salva ainda).")
+            local_db.close()
+            return
+
+        self._state.username = username
+        self._state.user_id = user_id
+        self._state.private_key_pem = priv_pem
+        self._state.local_db = local_db
+        self._state.modo_lan = True
+
+        bridge = ClientBridge(self, CorvoClient())  # sem conexao real — so pra ter a mesma interface
+        self._bridge = bridge
+        self._on_success(bridge, self._state)
 
     def _on_login_ok(self, username: str, senha: str, data: dict) -> None:
         self._state.username = username
@@ -438,6 +474,15 @@ class LoginWindow(ctk.CTk):
         else:
             pub_pem = crypto_utils.public_key_from_private(priv_pem)
         self._state.private_key_pem = priv_pem
+
+        from client.storage.local_db import LocalDB
+        vault_dir = key_vault.VAULT_DIR.parent  # ~/.corvo_negro
+        vault_dir.mkdir(parents=True, exist_ok=True)
+        local_db = LocalDB(str(vault_dir / f"{username}_local.db"), senha)
+        if self._state.user_id is not None:
+            local_db.set_user_id(self._state.user_id)
+        self._state.local_db = local_db
+
         bridge = self._obter_bridge()
         bridge.call(protocol.CMD_UPDATE_PUBKEY, {"public_key": pub_pem.decode("utf-8")})
         self._on_success(bridge, self._state)

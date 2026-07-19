@@ -9,11 +9,19 @@ Regra geral do design: corner_radius=0 em tudo. Nada arredondado.
 
 from __future__ import annotations
 
+import sys
 from pathlib import Path
 
 import customtkinter as ctk
 
-ASSETS_DIR = Path(__file__).resolve().parent.parent / "assets"
+# Rodando do codigo-fonte, ASSETS_DIR fica ao lado deste arquivo. Empacotado
+# com PyInstaller (--onefile), os arquivos de dados sao extraidos para uma
+# pasta temporaria exposta em sys._MEIPASS — sem esse desvio, o executavel
+# nao acha fontes/imagens porque __file__ aponta pra dentro do zip embutido.
+if hasattr(sys, "_MEIPASS"):
+    ASSETS_DIR = Path(sys._MEIPASS) / "client" / "assets"
+else:
+    ASSETS_DIR = Path(__file__).resolve().parent.parent / "assets"
 FONTS_DIR = ASSETS_DIR / "fonts"
 
 

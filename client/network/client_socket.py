@@ -46,6 +46,15 @@ class CorvoClient:
     def is_connected(self) -> bool:
         return self._running.is_set() and self._sock is not None
 
+    def reconnect(self, timeout: float = config.CONNECT_TIMEOUT) -> None:
+        """Fecha qualquer resto da conexao anterior e tenta abrir uma nova.
+
+        Levanta OSError se o servidor nao responder — quem chama decide se
+        tenta de novo ou desiste apos N tentativas.
+        """
+        self.close()
+        self.connect(timeout)
+
     # --- envio ----------------------------------------------------------------
 
     def send(self, message: dict) -> None:
