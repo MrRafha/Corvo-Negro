@@ -132,8 +132,8 @@ O servidor **jamais** tem acesso ao conteúdo em claro. A chave AES do fórum fo
 ### Servidor
 
 ```bash
-git clone https://github.com/MrRafha/corvo-negro.git
-cd corvo-negro/server
+git clone https://github.com/MrRafha/Corvo-Negro.git
+cd Corvo-Negro/server
 python -m venv venv
 source venv/bin/activate  # Linux/Mac
 venv\Scripts\activate     # Windows
@@ -146,7 +146,7 @@ O servidor sobe em `0.0.0.0:9999` por padrão. Configure porta e host em `server
 ### Cliente
 
 ```bash
-cd corvo-negro/client
+cd Corvo-Negro/client
 python -m venv venv
 source venv/bin/activate  # Linux/Mac
 venv\Scripts\activate     # Windows
@@ -162,13 +162,13 @@ Na primeira execução, configure o IP do servidor na tela de login (ou deixe em
 
 ### Primeiro acesso
 
-1. Abra o cliente e clique em **"Novo Corvo"** para registrar-se
+1. Abra o cliente e clique na aba **"🜲 NOVO CORVO"** para registrar-se
 2. Escolha um nome de usuário e senha (a senha nunca sai do seu dispositivo em claro)
 3. Faça login
 
 ### Criar um fórum
 
-1. Clique no **⚜** na sidebar
+1. Clique em **"＋ Fundar Fórum"** na sidebar
 2. Dê um nome ao fórum (ex: "Conclave dos Escribas")
 3. Um código de convite será gerado: **compartilhe apenas com quem deve entrar**
 
@@ -187,7 +187,7 @@ Se você tem permissão **`MANAGE_ROLES`**, acesse **⚔ Ordens** no menu do fó
 
 ### Modo LAN
 
-O modo LAN é ativado automaticamente quando a conexão com o servidor falha. Um indicador **🔴 LAN** aparece no cabeçalho. Todos os clientes na mesma rede local se descobrem e continuam a conversa. Quando a internet retorna, o histórico é sincronizado.
+O modo LAN é ativado automaticamente quando a conexão com o servidor falha. Um indicador **"LAN · N CORVOS"** aparece no cabeçalho, contando quantos peers foram descobertos na rede local. Todos os clientes na mesma rede se descobrem e continuam a conversa. Quando a internet retorna, o histórico é sincronizado.
 
 ---
 
