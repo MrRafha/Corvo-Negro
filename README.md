@@ -232,7 +232,7 @@ O modo LAN é ativado automaticamente quando a conexão com o servidor falha. Um
 
 ## 🎬 Demonstração
 
-Vídeo demonstrativo no YouTube: *(link após publicação)*
+[![Assista à demonstração no YouTube](https://img.youtube.com/vi/GxvZdf9Msj8/maxresdefault.jpg)](https://youtu.be/GxvZdf9Msj8)
 
 ---
 
