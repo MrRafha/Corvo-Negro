@@ -16,8 +16,9 @@
 
 ---
 
-## Decisões previstas (a preencher durante o desenvolvimento)
+## 2026-07-19 — Sprint 3: modo LAN, cache local e sync
 
-- Escolha de parâmetros PBKDF2 (iterações, tamanho de salt).
-- Modo AES (CBC + IV aleatório por mensagem).
-- Estratégia de resolução de conflitos do sync LAN ↔ online ("last-write-wins por timestamp — aceitável para escopo acadêmico").
+- **Cache local (`LocalDB`) não recifra `ciphertext`/`iv` das mensagens** — grava exatamente como chegaram (já cifradas com a AES do fórum, igual ao modo online).
+  *Motivo:* recifrar com a chave derivada da senha (PBKDF2) seria dupla-cifragem sem ganho real de segurança — quem tem a chave AES do fórum já decifra o conteúdo de qualquer forma — e só complicaria o fluxo de sync (teria que decifrar/recifrar a cada ida e volta entre local e servidor). O que é cifrado campo-a-campo com a chave derivada da senha são os metadados em claro que identificam pessoas/conteúdo no DB local: `sender` (username), `forum.name`, `known_users.public_key_pem`.
+- **Resolução de conflitos do sync LAN ↔ online: last-write-wins por `origin_timestamp`.**
+  *Motivo:* mensagens têm `uuid` gerado uma única vez na origem e nunca são editadas — não há conteúdo para mesclar, só ordem de exibição a resolver quando o histórico local (recebido via mesh) e o histórico do servidor se combinam após a reconexão. Ordenar por `origin_timestamp` (não pelo `id` local, que é só ordem de chegada) garante que mensagens trocadas em modo LAN apareçam intercaladas corretamente com as que chegaram por outros caminhos, sem exigir merge de conteúdo. Aceitável para o escopo acadêmico do projeto — um sistema de produção com edição de mensagens exigiria uma estratégia mais robusta (vetores de versão, CRDTs).

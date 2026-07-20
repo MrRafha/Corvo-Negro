@@ -468,7 +468,12 @@ class LoginWindow(ctk.CTk):
         self._state.user_id = data.get("user_id")
         try:
             priv_pem = key_vault.load_private_key(username, senha)
-        except FileNotFoundError:
+        except (FileNotFoundError, ValueError):
+            # FileNotFoundError: nunca logou nesta maquina. ValueError: vault
+            # local existe mas nao decifra com esta senha (ex.: banco do
+            # servidor foi recriado e o username voltou a ser aceito com
+            # senha nova, mas o vault local antigo ainda esta em disco) —
+            # nos dois casos, gera uma identidade nova e sobrescreve o vault.
             priv_pem, pub_pem = crypto_utils.generate_rsa_keypair()
             key_vault.save_private_key(username, priv_pem, senha)
         else:

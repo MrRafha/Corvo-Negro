@@ -49,3 +49,7 @@ desktop.ini
 
 # === Claude Code ===
 .claude/
+
+# === Documentos de bastidores (planejamento pessoal, nao fazem parte da entrega) ===
+docs/DEVELOPMENT.md
+docs/video_roteiro.md

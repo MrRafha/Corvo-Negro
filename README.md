@@ -46,6 +46,19 @@ Diferente de sistemas convencionais, o Corvo Negro opera em dois modos:
 
 ---
 
+## 🖼 Screenshots
+
+| | |
+|---|---|
+| ![Login](docs/screenshots/02_login.png) | ![Fundar fórum](docs/screenshots/04_criar_forum.png) |
+| Portal de acesso (login/registro) | Fundação de fórum com símbolo customizável |
+| ![Chat](docs/screenshots/06_chat_mensagem_enviada.png) | ![Cipher viewer](docs/screenshots/07_cipher_viewer.png) |
+| Chat com histórico e sidebar de membros | Visualizador de cifra — ciphertext AES-256-CBC real |
+| ![Roles](docs/screenshots/08_role_manager.png) | ![Decodificação](docs/screenshots/10_chat_b_recebeu.png) |
+| Gerenciador de ordens (roles) e permissões | Animação de decodificação (hash → texto revelando) |
+
+---
+
 ## ⚔ Arquitetura
 
 ```
@@ -213,7 +226,7 @@ O modo LAN é ativado automaticamente quando a conexão com o servidor falha. Um
 
 - [Especificação do protocolo](docs/protocol_spec.md)
 - [Arquitetura detalhada](docs/architecture.md)
-- [Guia de desenvolvimento](docs/DEVELOPMENT.md)
+- [Log de decisões técnicas](docs/decisions.md)
 
 ---
 
